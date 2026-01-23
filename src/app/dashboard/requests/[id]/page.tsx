@@ -37,6 +37,10 @@ export default function RequestDetailPage({ params }: { params: Promise<{ id: st
     const [signatureType, setSignatureType] = useState<'admin' | 'spv'>('admin');
     const [processing, setProcessing] = useState(false);
 
+    // Handover state
+    const [showHandoverModal, setShowHandoverModal] = useState(false);
+    const [handoverNote, setHandoverNote] = useState('');
+    const [handoverQuantities, setHandoverQuantities] = useState<Record<number, number>>({});
     useEffect(() => {
         const fetchData = async () => {
             setLoading(true);
@@ -61,7 +65,8 @@ export default function RequestDetailPage({ params }: { params: Promise<{ id: st
             department:departments!dept_code(name),
             items:request_items(
               quantity,
-              item:items(name, sku, unit)
+              item_id,
+              item:items(id, name, sku, unit, current_stock)
             )
           `)
                     .eq('id', resolvedParams.id)
@@ -149,6 +154,76 @@ export default function RequestDetailPage({ params }: { params: Promise<{ id: st
         } catch (error) {
             console.error('Error saving signature:', error);
             alert('Gagal menyimpan tanda tangan');
+        } finally {
+            setProcessing(false);
+        }
+    };
+
+    // Initialize handover quantities from request items
+    const openHandoverModal = () => {
+        if (request?.items) {
+            const quantities: Record<number, number> = {};
+            request.items.forEach((item, index) => {
+                quantities[index] = item.quantity;
+            });
+            setHandoverQuantities(quantities);
+        }
+        setHandoverNote('');
+        setShowHandoverModal(true);
+    };
+
+    // Handle item handover
+    const handleHandover = async () => {
+        if (!request) return;
+
+        setProcessing(true);
+        try {
+            // Update stock for each item using item_id
+            for (let i = 0; i < (request.items?.length || 0); i++) {
+                const reqItem = request.items![i];
+                const quantityToDeduct = handoverQuantities[i] || reqItem.quantity;
+
+                // Get current stock from the item relation
+                const currentStock = (reqItem as any).item?.current_stock || 0;
+                const newStock = Math.max(0, currentStock - quantityToDeduct);
+
+                // Update stock using item_id
+                const { error: updateError } = await supabase
+                    .from('items')
+                    .update({ current_stock: newStock })
+                    .eq('id', (reqItem as any).item_id);
+
+                if (updateError) {
+                    console.error('Error updating stock:', updateError);
+                    throw updateError;
+                }
+            }
+
+            // Update request status to completed
+            const { error: updateError } = await supabase
+                .from('requests')
+                .update({
+                    status: 'completed',
+                    updated_at: new Date().toISOString(),
+                })
+                .eq('id', request.id);
+
+            if (updateError) throw updateError;
+
+            // Notify requester
+            await supabase.from('notifications').insert({
+                user_id: request.requester_id,
+                message: `Barang untuk request ${request.doc_number} telah diserahkan`,
+                link: `/dashboard/requests/${request.id}`,
+            });
+
+            // Refresh request data
+            setRequest(prev => prev ? { ...prev, status: 'completed' as RequestStatus } : null);
+            setShowHandoverModal(false);
+            alert('Barang berhasil diserahkan! Stok telah diperbarui.');
+        } catch (error) {
+            console.error('Error during handover:', error);
+            alert('Gagal menyerahkan barang. Silakan coba lagi.');
         } finally {
             setProcessing(false);
         }
@@ -279,6 +354,33 @@ export default function RequestDetailPage({ params }: { params: Promise<{ id: st
                             </p>
                         </div>
                     )}
+
+                    {/* Handover Button for HRGA */}
+                    {userProfile?.role === 'hrga' && (request.status === 'scheduled' || request.status === 'approved_spv') && (
+                        <div className="mt-6 flex justify-end">
+                            <button
+                                onClick={openHandoverModal}
+                                className="btn bg-success text-white hover:bg-success-focus"
+                            >
+                                <svg className="mr-2 h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                </svg>
+                                Serahkan Barang
+                            </button>
+                        </div>
+                    )}
+
+                    {/* Completed Badge */}
+                    {request.status === 'completed' && (
+                        <div className="mt-6 rounded-lg bg-success/10 p-4">
+                            <div className="flex items-center gap-2">
+                                <svg className="h-5 w-5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                <p className="font-medium text-success">Barang sudah diserahkan</p>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 {/* Signatures */}
@@ -381,6 +483,99 @@ export default function RequestDetailPage({ params }: { params: Promise<{ id: st
                                 className="btn border border-slate-300 text-slate-600 hover:bg-slate-100 dark:border-navy-450 dark:text-navy-200"
                             >
                                 Batal
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Handover Modal */}
+            {showHandoverModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+                    <div className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl dark:bg-navy-700">
+                        <div className="mb-4 flex items-center justify-between">
+                            <h3 className="text-lg font-semibold text-slate-700 dark:text-navy-100">
+                                Serah Terima Barang
+                            </h3>
+                            <button
+                                type="button"
+                                onClick={() => setShowHandoverModal(false)}
+                                className="rounded-lg p-1 text-slate-400 hover:bg-slate-100"
+                            >
+                                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+
+                        <div className="mb-4 rounded-lg bg-warning/10 p-3 text-sm text-warning">
+                            <strong>Perhatian:</strong> Setelah diserahkan, stok barang akan dikurangi otomatis.
+                        </div>
+
+                        {/* Items to handover */}
+                        <div className="mb-4">
+                            <h4 className="mb-2 text-sm font-medium text-slate-600 dark:text-navy-200">
+                                Barang yang Diserahkan
+                            </h4>
+                            <div className="space-y-2">
+                                {request?.items?.map((item, index) => (
+                                    <div key={index} className="flex items-center justify-between rounded-lg border border-slate-200 p-3 dark:border-navy-500">
+                                        <div>
+                                            <p className="font-medium text-slate-700 dark:text-navy-100">
+                                                {item.item.name}
+                                            </p>
+                                            <p className="text-xs text-slate-500">{item.item.sku}</p>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <input
+                                                type="number"
+                                                min="0"
+                                                max={item.quantity}
+                                                value={handoverQuantities[index] || item.quantity}
+                                                onChange={(e) => setHandoverQuantities({
+                                                    ...handoverQuantities,
+                                                    [index]: Math.min(item.quantity, parseInt(e.target.value) || 0)
+                                                })}
+                                                className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-center text-sm dark:border-navy-450 dark:bg-navy-600"
+                                            />
+                                            <span className="text-sm text-slate-500">
+                                                / {item.quantity} {item.item.unit}
+                                            </span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Note */}
+                        <div className="mb-4">
+                            <label className="mb-1.5 block text-sm font-medium text-slate-600 dark:text-navy-100">
+                                Catatan (opsional)
+                            </label>
+                            <textarea
+                                value={handoverNote}
+                                onChange={(e) => setHandoverNote(e.target.value)}
+                                className="form-textarea w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm dark:border-navy-450"
+                                rows={2}
+                                placeholder="Catatan tambahan..."
+                            />
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex justify-end gap-3">
+                            <button
+                                onClick={() => setShowHandoverModal(false)}
+                                disabled={processing}
+                                className="btn border border-slate-300 text-slate-600 hover:bg-slate-100 dark:border-navy-450 dark:text-navy-200"
+                            >
+                                Batal
+                            </button>
+                            <button
+                                onClick={handleHandover}
+                                disabled={processing}
+                                className="btn bg-success text-white hover:bg-success-focus disabled:opacity-50"
+                            >
+                                {processing ? 'Memproses...' : 'Konfirmasi Serah Terima'}
                             </button>
                         </div>
                     </div>

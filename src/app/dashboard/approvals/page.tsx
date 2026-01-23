@@ -36,18 +36,27 @@ export default function ApprovalsPage() {
                             .single();
 
                         if (dept) {
+                            // Determine which departments this supervisor can approve
+                            let allowedDeptCodes = [dept.code];
+
+                            // Special case: QC supervisor can approve QC, QA, and PP
+                            if (dept.code === 'QC') {
+                                allowedDeptCodes = ['QC', 'QA', 'PP'];
+                            }
+
                             const { data: pendingRequests } = await supabase
                                 .from('requests')
                                 .select(`
                   *,
                   requester:profiles!requester_id(full_name, email),
+                  department:departments!dept_code(name),
                   items:request_items(
                     quantity,
                     item:items(name, sku, unit)
                   )
                 `)
                                 .eq('status', 'pending')
-                                .eq('dept_code', dept.code)
+                                .in('dept_code', allowedDeptCodes)
                                 .order('created_at', { ascending: false });
 
                             setRequests(pendingRequests || []);
@@ -78,6 +87,28 @@ export default function ApprovalsPage() {
         };
 
         fetchData();
+
+        // Subscribe to real-time changes for requests
+        const channel = supabase
+            .channel('approvals-realtime')
+            .on(
+                'postgres_changes',
+                {
+                    event: '*',
+                    schema: 'public',
+                    table: 'requests',
+                },
+                (payload) => {
+                    console.log('Request change detected:', payload);
+                    // Refetch data when changes occur
+                    fetchData();
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
     }, []);
 
     const handleApprove = async (request: Request) => {
@@ -101,6 +132,21 @@ export default function ApprovalsPage() {
                 message: `Request ${request.doc_number} telah disetujui oleh Supervisor`,
                 link: `/dashboard/requests/${request.id}`,
             });
+
+            // Notify all HRGA users
+            const { data: hrgaUsers } = await supabase
+                .from('profiles')
+                .select('id')
+                .eq('role', 'hrga');
+
+            if (hrgaUsers && hrgaUsers.length > 0) {
+                const hrgaNotifications = hrgaUsers.map(h => ({
+                    user_id: h.id,
+                    message: `Request ${request.doc_number} siap dijadwalkan`,
+                    link: '/dashboard/batches',
+                }));
+                await supabase.from('notifications').insert(hrgaNotifications);
+            }
 
             // Remove from list
             setRequests(prev => prev.filter(r => r.id !== request.id));

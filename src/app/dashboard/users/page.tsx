@@ -23,6 +23,10 @@ export default function UsersPage() {
     const [editingUser, setEditingUser] = useState<UserWithDept | null>(null);
     const [processing, setProcessing] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
+    const [showResetPasswordModal, setShowResetPasswordModal] = useState(false);
+    const [resetPasswordUser, setResetPasswordUser] = useState<UserWithDept | null>(null);
+    const [newPassword, setNewPassword] = useState('');
+    const [selectedUsers, setSelectedUsers] = useState<Set<string>>(new Set());
 
     // Form state
     const [formData, setFormData] = useState({
@@ -219,6 +223,95 @@ export default function UsersPage() {
         }
     };
 
+    const handleResetPassword = async () => {
+        if (!resetPasswordUser) return;
+        if (!newPassword || newPassword.length < 6) {
+            alert('Password minimal 6 karakter');
+            return;
+        }
+
+        setProcessing(true);
+        try {
+            const { error } = await supabase.auth.admin.updateUserById(
+                resetPasswordUser.id,
+                { password: newPassword }
+            );
+
+            if (error) throw error;
+
+            alert('Password berhasil direset!');
+            setShowResetPasswordModal(false);
+            setResetPasswordUser(null);
+            setNewPassword('');
+        } catch (error: any) {
+            console.error('Error resetting password:', error);
+            alert(`Gagal reset password: ${error.message}`);
+        } finally {
+            setProcessing(false);
+        }
+    };
+
+    const openResetPasswordModal = (user: UserWithDept) => {
+        setResetPasswordUser(user);
+        setNewPassword('');
+        setShowResetPasswordModal(true);
+    };
+
+    const toggleSelectUser = (userId: string) => {
+        const newSet = new Set(selectedUsers);
+        if (newSet.has(userId)) {
+            newSet.delete(userId);
+        } else {
+            newSet.add(userId);
+        }
+        setSelectedUsers(newSet);
+    };
+
+    const toggleSelectAll = () => {
+        if (selectedUsers.size === filteredUsers.length) {
+            setSelectedUsers(new Set());
+        } else {
+            setSelectedUsers(new Set(filteredUsers.map(u => u.id)));
+        }
+    };
+
+    const handleBatchDelete = async () => {
+        if (selectedUsers.size === 0) return;
+
+        if (!confirm(`Apakah Anda yakin ingin menghapus ${selectedUsers.size} user? User akan dihapus permanen dari sistem.`)) return;
+
+        setProcessing(true);
+        try {
+            let successCount = 0;
+            let errorCount = 0;
+
+            for (const userId of Array.from(selectedUsers)) {
+                const { error } = await supabase
+                    .rpc('delete_user_completely', { user_id: userId });
+
+                if (error) {
+                    console.error('Delete error for user:', userId, error);
+                    errorCount++;
+                } else {
+                    successCount++;
+                }
+            }
+
+            if (successCount > 0) {
+                alert(`${successCount} user berhasil dihapus!${errorCount > 0 ? ` ${errorCount} gagal dihapus.` : ''}`);
+                setSelectedUsers(new Set());
+                fetchData();
+            } else {
+                alert('Gagal menghapus user');
+            }
+        } catch (error) {
+            console.error('Error batch deleting users:', error);
+            alert('Gagal menghapus user');
+        } finally {
+            setProcessing(false);
+        }
+    };
+
     const getRoleBadge = (role: string) => {
         const styles: Record<string, string> = {
             admin_produksi: 'bg-primary/10 text-primary',
@@ -346,19 +439,33 @@ export default function UsersPage() {
             <div className="card">
                 <div className="flex flex-col gap-4 border-b border-slate-200 p-4 dark:border-navy-600 sm:flex-row sm:items-center sm:justify-between">
                     <h3 className="font-medium text-slate-700 dark:text-navy-100">Daftar User</h3>
-                    <div className="relative">
-                        <input
-                            type="text"
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                            placeholder="Cari user..."
-                            className="form-input w-full rounded-lg border border-slate-300 bg-transparent py-2 pl-9 pr-3 text-sm placeholder:text-slate-400 dark:border-navy-450 sm:w-64"
-                        />
-                        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
-                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                            </svg>
-                        </span>
+                    <div className="flex items-center gap-3">
+                        {selectedUsers.size > 0 && (
+                            <button
+                                onClick={handleBatchDelete}
+                                disabled={processing}
+                                className="btn bg-error text-white hover:bg-error-focus disabled:opacity-50"
+                            >
+                                <svg className="mr-1 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                                Hapus ({selectedUsers.size})
+                            </button>
+                        )}
+                        <div className="relative">
+                            <input
+                                type="text"
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                placeholder="Cari user..."
+                                className="form-input w-full rounded-lg border border-slate-300 bg-transparent py-2 pl-9 pr-3 text-sm placeholder:text-slate-400 dark:border-navy-450 sm:w-64"
+                            />
+                            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+                                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                </svg>
+                            </span>
+                        </div>
                     </div>
                 </div>
 
@@ -366,6 +473,14 @@ export default function UsersPage() {
                     <table className="w-full">
                         <thead>
                             <tr className="border-b border-slate-200 bg-slate-50 dark:border-navy-600 dark:bg-navy-800">
+                                <th className="px-4 py-3 text-left">
+                                    <input
+                                        type="checkbox"
+                                        checked={selectedUsers.size === filteredUsers.length && filteredUsers.length > 0}
+                                        onChange={toggleSelectAll}
+                                        className="h-4 w-4 rounded border-2 border-slate-300 text-primary transition-all hover:border-primary focus:ring-2 focus:ring-primary/20 focus:ring-offset-0 checked:border-primary checked:bg-primary dark:border-navy-450 dark:checked:border-accent dark:checked:bg-accent"
+                                    />
+                                </th>
                                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-slate-500 dark:text-navy-300">User</th>
                                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-slate-500 dark:text-navy-300">Username</th>
                                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-slate-500 dark:text-navy-300">Role</th>
@@ -375,7 +490,15 @@ export default function UsersPage() {
                         </thead>
                         <tbody>
                             {filteredUsers.map((user) => (
-                                <tr key={user.id} className="border-b border-slate-100 dark:border-navy-700">
+                                <tr key={user.id} className={`border-b border-slate-100 dark:border-navy-700 ${selectedUsers.has(user.id) ? 'bg-primary/5 dark:bg-accent/5' : ''}`}>
+                                    <td className="px-4 py-3">
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedUsers.has(user.id)}
+                                            onChange={() => toggleSelectUser(user.id)}
+                                            className="h-4 w-4 rounded border-2 border-slate-300 text-primary transition-all hover:border-primary focus:ring-2 focus:ring-primary/20 focus:ring-offset-0 checked:border-primary checked:bg-primary dark:border-navy-450 dark:checked:border-accent dark:checked:bg-accent"
+                                        />
+                                    </td>
                                     <td className="px-4 py-3">
                                         <div className="flex items-center gap-3">
                                             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary">
@@ -411,6 +534,15 @@ export default function UsersPage() {
                                             >
                                                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                                </svg>
+                                            </button>
+                                            <button
+                                                onClick={() => openResetPasswordModal(user)}
+                                                className="rounded-lg p-2 text-warning transition-colors hover:bg-warning/10"
+                                                title="Reset Password"
+                                            >
+                                                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
                                                 </svg>
                                             </button>
                                             <button
@@ -566,6 +698,54 @@ export default function UsersPage() {
                                 </button>
                             </div>
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Reset Password Modal */}
+            {showResetPasswordModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+                    <div className="mx-4 w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-navy-700">
+                        <h3 className="text-lg font-semibold text-slate-700 dark:text-navy-100">
+                            Reset Password
+                        </h3>
+                        <p className="mt-1 text-sm text-slate-500 dark:text-navy-300">
+                            Reset password untuk: {resetPasswordUser?.email}
+                        </p>
+
+                        <div className="mt-4">
+                            <label className="mb-1.5 block text-sm font-medium text-slate-600 dark:text-navy-100">
+                                Password Baru <span className="text-error">*</span>
+                            </label>
+                            <input
+                                type="password"
+                                value={newPassword}
+                                onChange={(e) => setNewPassword(e.target.value)}
+                                placeholder="Minimal 6 karakter"
+                                className="form-input w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 dark:border-navy-450"
+                            />
+                        </div>
+
+                        <div className="mt-6 flex justify-end gap-3">
+                            <button
+                                onClick={() => {
+                                    setShowResetPasswordModal(false);
+                                    setResetPasswordUser(null);
+                                    setNewPassword('');
+                                }}
+                                disabled={processing}
+                                className="btn border border-slate-300 text-slate-600 hover:bg-slate-100 dark:border-navy-450 dark:text-navy-200"
+                            >
+                                Batal
+                            </button>
+                            <button
+                                onClick={handleResetPassword}
+                                disabled={processing || !newPassword}
+                                className="btn bg-warning text-white hover:bg-warning-focus disabled:opacity-50"
+                            >
+                                {processing ? 'Memproses...' : 'Reset Password'}
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

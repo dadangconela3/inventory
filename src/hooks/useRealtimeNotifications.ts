@@ -75,6 +75,9 @@ export function useRealtimeNotifications({
                     setNotifications((prev) => [newNotification, ...prev]);
                     onNewNotification?.(newNotification);
 
+                    // Show toast notification
+                    showToast(newNotification.message, 'info');
+
                     // Show browser notification if permitted
                     if (Notification.permission === 'granted') {
                         new Notification('Notifikasi Baru', {
@@ -174,7 +177,7 @@ export function showToast(message: string, type: 'success' | 'error' | 'info' | 
         warning: 'bg-warning',
     };
 
-    toast.className = `fixed bottom-4 right-4 z-50 flex items-center gap-2 rounded-lg ${bgColors[type]} px-4 py-3 text-white shadow-lg transition-all duration-300 translate-x-full`;
+    toast.className = `fixed top-20 right-4 z-50 flex items-center gap-2 rounded-lg ${bgColors[type]} px-4 py-3 text-white shadow-lg transition-all duration-300 translate-x-full`;
     toast.innerHTML = `
     <span class="text-sm font-medium">${message}</span>
     <button onclick="this.parentElement.remove()" class="ml-2 text-white/80 hover:text-white">

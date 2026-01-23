@@ -152,6 +152,27 @@ export interface OcrVerificationInput {
     }[];
 }
 
+// Incoming Stock
+export interface IncomingStock {
+    id: string;
+    po_number: string;
+    incoming_date: string;
+    notes?: string | null;
+    created_by: string;
+    created_at: string;
+    updated_at: string;
+}
+
+// Incoming Stock Item
+export interface IncomingStockItem {
+    id: string;
+    incoming_id: string;
+    item_id: string;
+    quantity: number;
+    created_at: string;
+    item?: Item;
+}
+
 // Role-Department Mapping - Must match database department codes!
 export const PRODUCTION_DEPARTMENTS = ['MLD', 'PLA', 'PA', 'PB'] as const;
 export const INDIRECT_DEPARTMENTS = ['PP', 'QC', 'QA', 'PPIC'] as const;

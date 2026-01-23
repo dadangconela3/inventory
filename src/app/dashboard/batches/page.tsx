@@ -14,6 +14,7 @@ export default function BatchSchedulingPage() {
     const [scheduleTime, setScheduleTime] = useState('09:00');
     const [showModal, setShowModal] = useState(false);
     const [userProfile, setUserProfile] = useState<Profile | null>(null);
+    const [pendingBatches, setPendingBatches] = useState<any[]>([]);
 
     useEffect(() => {
         const fetchData = async () => {
@@ -47,6 +48,27 @@ export default function BatchSchedulingPage() {
                     .order('created_at', { ascending: true });
 
                 setApprovedRequests(data || []);
+
+                // Fetch pending batches (already scheduled but not handed over)
+                const { data: batches } = await supabase
+                    .from('pickup_batches')
+                    .select(`
+                        *,
+                        requests:requests(
+                            id,
+                            doc_number,
+                            requester:profiles!requester_id(full_name),
+                            department:departments!dept_code(name),
+                            items:request_items(
+                                quantity,
+                                item:items(name, unit)
+                            )
+                        )
+                    `)
+                    .eq('hrga_status', 'pending')
+                    .order('schedule_date', { ascending: true });
+
+                setPendingBatches(batches || []);
             } catch (error) {
                 console.error('Error fetching data:', error);
             } finally {
@@ -129,6 +151,21 @@ export default function BatchSchedulingPage() {
                 await supabase.from('notifications').insert(notifications);
             }
 
+            // Notify requesters
+            const { data: requests } = await supabase
+                .from('requests')
+                .select('requester_id, doc_number')
+                .in('id', Array.from(selectedRequests));
+
+            if (requests) {
+                const requesterNotifications = requests.map(r => ({
+                    user_id: r.requester_id,
+                    message: `Request ${r.doc_number} dijadwalkan untuk ${scheduleDatetime.toLocaleDateString('id-ID')} pukul ${scheduleDatetime.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}`,
+                    link: '/dashboard/requests',
+                }));
+                await supabase.from('notifications').insert(requesterNotifications);
+            }
+
             // Clear selection and refresh
             setSelectedRequests(new Set());
             setShowModal(false);
@@ -168,20 +205,77 @@ export default function BatchSchedulingPage() {
                 </button>
             </div>
 
-            {/* Info Card */}
-            <div className="card bg-gradient-to-r from-info to-info-focus p-5 text-white">
-                <div className="flex items-center gap-4">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white/20">
-                        <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                        </svg>
+            {/* Info Cards */}
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="card bg-gradient-to-r from-warning to-warning-focus p-5 text-white">
+                    <div className="flex items-center gap-4">
+                        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white/20">
+                            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                        </div>
+                        <div>
+                            <p className="text-sm opacity-90">Batch Menunggu Handover</p>
+                            <p className="text-3xl font-bold">{pendingBatches.length}</p>
+                        </div>
                     </div>
-                    <div>
-                        <p className="text-sm opacity-90">Request Siap Dijadwalkan</p>
-                        <p className="text-3xl font-bold">{approvedRequests.length}</p>
+                </div>
+                <div className="card bg-gradient-to-r from-info to-info-focus p-5 text-white">
+                    <div className="flex items-center gap-4">
+                        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white/20">
+                            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                            </svg>
+                        </div>
+                        <div>
+                            <p className="text-sm opacity-90">Request Siap Dijadwalkan</p>
+                            <p className="text-3xl font-bold">{approvedRequests.length}</p>
+                        </div>
                     </div>
                 </div>
             </div>
+
+            {/* Pending Batches Section */}
+            {pendingBatches.length > 0 && (
+                <div className="card">
+                    <div className="border-b border-slate-200 p-4 dark:border-navy-600">
+                        <h3 className="font-medium text-slate-700 dark:text-navy-100">Batch Menunggu Handover</h3>
+                        <p className="mt-1 text-sm text-slate-500 dark:text-navy-300">
+                            Batch yang sudah dijadwalkan dan menunggu proses handover
+                        </p>
+                    </div>
+                    <div className="p-4">
+                        <div className="space-y-4">
+                            {pendingBatches.map((batch) => (
+                                <div key={batch.id} className="rounded-lg border border-slate-200 p-4 dark:border-navy-600">
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <p className="font-medium text-slate-700 dark:text-navy-100">
+                                                Batch #{batch.id.slice(0, 8)}
+                                            </p>
+                                            <p className="mt-1 text-sm text-slate-500 dark:text-navy-300">
+                                                Jadwal: {new Date(batch.schedule_date).toLocaleString('id-ID', {
+                                                    dateStyle: 'medium',
+                                                    timeStyle: 'short'
+                                                })}
+                                            </p>
+                                            <p className="mt-1 text-sm text-slate-600 dark:text-navy-200">
+                                                {batch.requests?.length || 0} request
+                                            </p>
+                                        </div>
+                                        <Link
+                                            href={`/dashboard/batches/${batch.id}`}
+                                            className="btn bg-primary text-white hover:bg-primary-focus dark:bg-accent"
+                                        >
+                                            Lihat Detail
+                                        </Link>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Requests Table */}
             <div className="card">
@@ -194,7 +288,7 @@ export default function BatchSchedulingPage() {
                                         type="checkbox"
                                         checked={selectedRequests.size === approvedRequests.length && approvedRequests.length > 0}
                                         onChange={selectAll}
-                                        className="form-checkbox is-basic h-5 w-5 rounded border-slate-400/70 checked:border-primary checked:bg-primary dark:border-navy-400"
+                                        className="h-4 w-4 rounded border-2 border-slate-300 text-primary transition-all hover:border-primary focus:ring-2 focus:ring-primary/20 focus:ring-offset-0 checked:border-primary checked:bg-primary dark:border-navy-450 dark:checked:border-accent dark:checked:bg-accent"
                                     />
                                 </th>
                                 <th className="px-5 py-4 text-left text-xs font-semibold uppercase text-slate-500 dark:text-navy-300">
@@ -238,7 +332,7 @@ export default function BatchSchedulingPage() {
                                                 type="checkbox"
                                                 checked={selectedRequests.has(request.id)}
                                                 onChange={() => toggleSelect(request.id)}
-                                                className="form-checkbox is-basic h-5 w-5 rounded border-slate-400/70 checked:border-primary checked:bg-primary dark:border-navy-400"
+                                                className="h-4 w-4 rounded border-2 border-slate-300 text-primary transition-all hover:border-primary focus:ring-2 focus:ring-primary/20 focus:ring-offset-0 checked:border-primary checked:bg-primary dark:border-navy-450 dark:checked:border-accent dark:checked:bg-accent"
                                             />
                                         </td>
                                         <td className="px-5 py-4">

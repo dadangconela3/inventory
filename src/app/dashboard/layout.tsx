@@ -19,7 +19,6 @@ export default function DashboardLayout({
     const pathname = usePathname();
     const [loading, setLoading] = useState(!cachedProfile);
     const [profile, setProfile] = useState<Profile | null>(cachedProfile);
-    const [notificationCount, setNotificationCount] = useState(0);
 
     const checkAuth = useCallback(async () => {
         if (!isSupabaseConfigured) {
@@ -47,13 +46,9 @@ export default function DashboardLayout({
                 return;
             }
 
-            // Use cached profile if available and matches current user
             if (cachedProfile && cachedProfile.id === user.id) {
                 setProfile(cachedProfile);
                 setLoading(false);
-
-                // Fetch notification count in background
-                fetchNotificationCount(user.id);
                 return;
             }
 
@@ -82,9 +77,6 @@ export default function DashboardLayout({
                 cachedProfile = profileData;
             }
 
-            // Fetch notification count
-            await fetchNotificationCount(user.id);
-
         } catch (err) {
             console.error('Auth check error:', err);
             cachedProfile = null;
@@ -93,19 +85,6 @@ export default function DashboardLayout({
             setLoading(false);
         }
     }, [router]);
-
-    const fetchNotificationCount = async (userId: string) => {
-        try {
-            const { count } = await supabase
-                .from('notifications')
-                .select('*', { count: 'exact', head: true })
-                .eq('user_id', userId)
-                .eq('is_read', false);
-            setNotificationCount(count || 0);
-        } catch (error) {
-            console.error('Error fetching notification count:', error);
-        }
-    };
 
     useEffect(() => {
         checkAuth();
@@ -152,7 +131,6 @@ export default function DashboardLayout({
             {/* Header */}
             <Header
                 userName={profile?.full_name || profile?.email}
-                notificationCount={notificationCount}
             />
 
             {/* Main Content */}

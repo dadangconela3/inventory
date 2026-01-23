@@ -3,13 +3,28 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
-import { Request, RequestStatus, Profile, UserRole, PRODUCTION_DEPARTMENTS, INDIRECT_DEPARTMENTS } from '@/types/database';
+import { Request, RequestStatus, Profile, UserRole, PRODUCTION_DEPARTMENTS, INDIRECT_DEPARTMENTS, Department, RequestItem, Item } from '@/types/database';
+
+interface RequestWithRelations extends Omit<Request, 'requester' | 'department' | 'items'> {
+    requester?: { full_name: string; email: string };
+    department?: { name: string };
+    items?: (RequestItem & {
+        item?: Item;
+    })[];
+}
 
 export default function RequestsListPage() {
-    const [requests, setRequests] = useState<Request[]>([]);
+    const [requests, setRequests] = useState<RequestWithRelations[]>([]);
     const [loading, setLoading] = useState(true);
     const [statusFilter, setStatusFilter] = useState<RequestStatus | 'all'>('all');
     const [userProfile, setUserProfile] = useState<Profile | null>(null);
+
+    // Bulk approval state
+    const [selectedRequests, setSelectedRequests] = useState<Set<string>>(new Set());
+    const [showBulkApprovalModal, setShowBulkApprovalModal] = useState(false);
+    const [selectedRequestDetails, setSelectedRequestDetails] = useState<RequestWithRelations[]>([]);
+    const [loadingDetails, setLoadingDetails] = useState(false);
+    const [processing, setProcessing] = useState(false);
 
     useEffect(() => {
         const fetchData = async () => {
@@ -92,6 +107,28 @@ export default function RequestsListPage() {
         };
 
         fetchData();
+
+        // Subscribe to real-time changes for requests
+        const channel = supabase
+            .channel('requests-list-realtime')
+            .on(
+                'postgres_changes',
+                {
+                    event: '*',
+                    schema: 'public',
+                    table: 'requests',
+                },
+                (payload) => {
+                    console.log('Request change detected in list:', payload);
+                    // Refetch data when changes occur
+                    fetchData();
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
     }, [statusFilter]);
 
     const getStatusBadge = (status: RequestStatus) => {
@@ -152,6 +189,246 @@ export default function RequestsListPage() {
         return role === 'admin_produksi' || role === 'admin_indirect' || role === 'admin_dept';
     };
 
+    // Check if user is supervisor
+    const isSupervisor = userProfile?.role === 'supervisor';
+
+    // Get pending requests for supervisor
+    const pendingRequests = requests.filter(r => r.status === 'pending');
+
+    // Toggle request selection
+    const toggleSelectRequest = (requestId: string) => {
+        const newSelected = new Set(selectedRequests);
+        if (newSelected.has(requestId)) {
+            newSelected.delete(requestId);
+        } else {
+            newSelected.add(requestId);
+        }
+        setSelectedRequests(newSelected);
+    };
+
+    // Select all pending requests
+    const toggleSelectAll = () => {
+        if (selectedRequests.size === pendingRequests.length) {
+            setSelectedRequests(new Set());
+        } else {
+            setSelectedRequests(new Set(pendingRequests.map(r => r.id)));
+        }
+    };
+
+    // Open bulk approval modal with details
+    const openBulkApprovalModal = async () => {
+        if (selectedRequests.size === 0) return;
+
+        setLoadingDetails(true);
+        setShowBulkApprovalModal(true);
+
+        try {
+            // Fetch details for all selected requests
+            const { data, error } = await supabase
+                .from('requests')
+                .select(`
+                    *,
+                    requester:profiles!requester_id(full_name, email),
+                    department:departments!dept_code(name),
+                    items:request_items(quantity, item:items(name, sku, unit))
+                `)
+                .in('id', Array.from(selectedRequests));
+
+            if (error) throw error;
+            setSelectedRequestDetails(data || []);
+        } catch (error) {
+            console.error('Error fetching request details:', error);
+            alert('Gagal memuat detail request');
+        } finally {
+            setLoadingDetails(false);
+        }
+    };
+
+    // Handle bulk approval
+    const handleBulkApproval = async () => {
+        if (selectedRequests.size === 0) return;
+
+        setProcessing(true);
+        try {
+            const { error } = await supabase
+                .from('requests')
+                .update({
+                    status: 'approved_spv',
+                    updated_at: new Date().toISOString()
+                })
+                .in('id', Array.from(selectedRequests));
+
+            if (error) throw error;
+
+            // Get request details for notifications
+            const { data: approvedRequests } = await supabase
+                .from('requests')
+                .select('id, doc_number, requester_id')
+                .in('id', Array.from(selectedRequests));
+
+            if (approvedRequests) {
+                // Notify each requester
+                const requesterNotifications = approvedRequests.map(req => ({
+                    user_id: req.requester_id,
+                    message: `Request ${req.doc_number} telah disetujui oleh Supervisor`,
+                    link: `/dashboard/requests/${req.id}`,
+                }));
+                await supabase.from('notifications').insert(requesterNotifications);
+
+                // Notify all HRGA users
+                const { data: hrgaUsers } = await supabase
+                    .from('profiles')
+                    .select('id')
+                    .eq('role', 'hrga');
+
+                if (hrgaUsers && hrgaUsers.length > 0) {
+                    const hrgaNotifications = approvedRequests.flatMap(req =>
+                        hrgaUsers.map(h => ({
+                            user_id: h.id,
+                            message: `Request ${req.doc_number} siap dijadwalkan`,
+                            link: '/dashboard/batches',
+                        }))
+                    );
+                    await supabase.from('notifications').insert(hrgaNotifications);
+                }
+            }
+
+            // Update local state
+            setRequests(prev => prev.map(r =>
+                selectedRequests.has(r.id)
+                    ? { ...r, status: 'approved_spv' as RequestStatus }
+                    : r
+            ));
+
+            setSelectedRequests(new Set());
+            setShowBulkApprovalModal(false);
+            alert(`${selectedRequests.size} request berhasil disetujui!`);
+        } catch (error) {
+            console.error('Error approving requests:', error);
+            alert('Gagal menyetujui request');
+        } finally {
+            setProcessing(false);
+        }
+    };
+
+    // ==================== HRGA BULK HANDOVER ====================
+    const isHRGA = userProfile?.role === 'hrga';
+
+    // Get handoverable requests (scheduled or approved_spv)
+    const handoverableRequests = requests.filter(r => r.status === 'scheduled' || r.status === 'approved_spv');
+
+    // Bulk handover state
+    const [selectedForHandover, setSelectedForHandover] = useState<Set<string>>(new Set());
+    const [showBulkHandoverModal, setShowBulkHandoverModal] = useState(false);
+    const [handoverDetails, setHandoverDetails] = useState<RequestWithRelations[]>([]);
+    const [loadingHandoverDetails, setLoadingHandoverDetails] = useState(false);
+    const [processingHandover, setProcessingHandover] = useState(false);
+
+    // Toggle handover selection
+    const toggleSelectForHandover = (requestId: string) => {
+        const newSelected = new Set(selectedForHandover);
+        if (newSelected.has(requestId)) {
+            newSelected.delete(requestId);
+        } else {
+            newSelected.add(requestId);
+        }
+        setSelectedForHandover(newSelected);
+    };
+
+    // Select all handoverable requests
+    const toggleSelectAllHandover = () => {
+        if (selectedForHandover.size === handoverableRequests.length) {
+            setSelectedForHandover(new Set());
+        } else {
+            setSelectedForHandover(new Set(handoverableRequests.map(r => r.id)));
+        }
+    };
+
+    // Open bulk handover modal
+    const openBulkHandoverModal = async () => {
+        if (selectedForHandover.size === 0) return;
+
+        setLoadingHandoverDetails(true);
+        setShowBulkHandoverModal(true);
+
+        try {
+            const { data, error } = await supabase
+                .from('requests')
+                .select(`
+                    *,
+                    requester:profiles!requester_id(full_name, email),
+                    department:departments!dept_code(name),
+                    items:request_items(quantity, item:items(id, name, sku, unit, current_stock))
+                `)
+                .in('id', Array.from(selectedForHandover));
+
+            if (error) throw error;
+            setHandoverDetails(data || []);
+        } catch (error) {
+            console.error('Error fetching handover details:', error);
+            alert('Gagal memuat detail request');
+        } finally {
+            setLoadingHandoverDetails(false);
+        }
+    };
+
+    // Handle bulk handover
+    const handleBulkHandover = async () => {
+        if (selectedForHandover.size === 0) return;
+
+        setProcessingHandover(true);
+        try {
+            // Update stock for each item in each request
+            for (const req of handoverDetails) {
+                for (const reqItem of (req.items || [])) {
+                    const currentStock = reqItem.item?.current_stock || 0;
+                    const newStock = Math.max(0, currentStock - reqItem.quantity);
+
+                    await supabase
+                        .from('items')
+                        .update({ current_stock: newStock })
+                        .eq('id', reqItem.item?.id);
+                }
+            }
+
+            // Update all selected requests to completed
+            const { error } = await supabase
+                .from('requests')
+                .update({
+                    status: 'completed',
+                    updated_at: new Date().toISOString()
+                })
+                .in('id', Array.from(selectedForHandover));
+
+            if (error) throw error;
+
+            // Notify all requesters
+            const requesterIds = new Set(handoverDetails.map(r => r.requester_id));
+            const notifications = Array.from(requesterIds).map(userId => ({
+                user_id: userId,
+                message: 'Barang untuk request Anda telah diserahkan',
+                link: '/dashboard/requests',
+            }));
+            await supabase.from('notifications').insert(notifications);
+
+            // Update local state
+            setRequests(prev => prev.map(r =>
+                selectedForHandover.has(r.id)
+                    ? { ...r, status: 'completed' as RequestStatus }
+                    : r
+            ));
+
+            setSelectedForHandover(new Set());
+            setShowBulkHandoverModal(false);
+            alert(`${selectedForHandover.size} request berhasil diserahkan! Stok telah diperbarui.`);
+        } catch (error) {
+            console.error('Error during bulk handover:', error);
+            alert('Gagal menyerahkan barang');
+        } finally {
+            setProcessingHandover(false);
+        }
+    };
+
     return (
         <div className="space-y-6">
             {/* Page Header */}
@@ -192,6 +469,32 @@ export default function RequestsListPage() {
                             Buat Request
                         </Link>
                     )}
+
+                    {/* Bulk Approve Button for Supervisor */}
+                    {isSupervisor && selectedRequests.size > 0 && (
+                        <button
+                            onClick={openBulkApprovalModal}
+                            className="btn bg-success text-white hover:bg-success-focus"
+                        >
+                            <svg className="mr-1 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                            Setujui ({selectedRequests.size})
+                        </button>
+                    )}
+
+                    {/* Bulk Handover Button for HRGA */}
+                    {isHRGA && selectedForHandover.size > 0 && (
+                        <button
+                            onClick={openBulkHandoverModal}
+                            className="btn bg-success text-white hover:bg-success-focus"
+                        >
+                            <svg className="mr-1 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                            Serahkan ({selectedForHandover.size})
+                        </button>
+                    )}
                 </div>
             </div>
 
@@ -201,6 +504,30 @@ export default function RequestsListPage() {
                     <table className="w-full">
                         <thead>
                             <tr className="border-b border-slate-150 dark:border-navy-600">
+                                {/* Checkbox column for supervisor */}
+                                {isSupervisor && (
+                                    <th className="px-3 py-4 text-center">
+                                        <input
+                                            type="checkbox"
+                                            checked={pendingRequests.length > 0 && selectedRequests.size === pendingRequests.length}
+                                            onChange={toggleSelectAll}
+                                            className="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                                            title="Pilih Semua"
+                                        />
+                                    </th>
+                                )}
+                                {/* Checkbox column for HRGA handover */}
+                                {isHRGA && (
+                                    <th className="px-3 py-4 text-center">
+                                        <input
+                                            type="checkbox"
+                                            checked={handoverableRequests.length > 0 && selectedForHandover.size === handoverableRequests.length}
+                                            onChange={toggleSelectAllHandover}
+                                            className="h-4 w-4 rounded border-slate-300 text-success focus:ring-success"
+                                            title="Pilih Semua untuk Diserahkan"
+                                        />
+                                    </th>
+                                )}
                                 <th className="px-5 py-4 text-left text-xs font-semibold uppercase text-slate-500 dark:text-navy-300">
                                     No. Dokumen
                                 </th>
@@ -238,7 +565,37 @@ export default function RequestsListPage() {
                                 </tr>
                             ) : (
                                 requests.map((request) => (
-                                    <tr key={request.id} className="border-b border-slate-100 last:border-0 dark:border-navy-700">
+                                    <tr key={request.id} className={`border-b border-slate-100 last:border-0 dark:border-navy-700 ${selectedRequests.has(request.id) ? 'bg-primary/5' : ''}`}>
+                                        {/* Checkbox for supervisor - only for pending */}
+                                        {isSupervisor && (
+                                            <td className="px-3 py-4 text-center">
+                                                {request.status === 'pending' ? (
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={selectedRequests.has(request.id)}
+                                                        onChange={() => toggleSelectRequest(request.id)}
+                                                        className="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                                                    />
+                                                ) : (
+                                                    <span className="text-slate-300">-</span>
+                                                )}
+                                            </td>
+                                        )}
+                                        {/* Checkbox for HRGA - only for scheduled/approved_spv */}
+                                        {isHRGA && (
+                                            <td className="px-3 py-4 text-center">
+                                                {(request.status === 'scheduled' || request.status === 'approved_spv') ? (
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={selectedForHandover.has(request.id)}
+                                                        onChange={() => toggleSelectForHandover(request.id)}
+                                                        className="h-4 w-4 rounded border-slate-300 text-success focus:ring-success"
+                                                    />
+                                                ) : (
+                                                    <span className="text-slate-300">-</span>
+                                                )}
+                                            </td>
+                                        )}
                                         <td className="px-5 py-4">
                                             <span className="font-medium text-slate-700 dark:text-navy-100">
                                                 {request.doc_number}
@@ -281,6 +638,175 @@ export default function RequestsListPage() {
                     </table>
                 </div>
             </div>
-        </div>
+
+            {/* Bulk Approval Modal */}
+            {
+                showBulkApprovalModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+                        <div className="max-h-[80vh] w-full max-w-2xl overflow-hidden rounded-lg bg-white shadow-xl dark:bg-navy-700">
+                            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4 dark:border-navy-600">
+                                <h3 className="text-lg font-semibold text-slate-700 dark:text-navy-100">
+                                    Konfirmasi Persetujuan ({selectedRequests.size} Request)
+                                </h3>
+                                <button
+                                    onClick={() => setShowBulkApprovalModal(false)}
+                                    className="rounded-lg p-1 text-slate-400 hover:bg-slate-100"
+                                >
+                                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+
+                            <div className="max-h-[50vh] overflow-y-auto p-6">
+                                {loadingDetails ? (
+                                    <div className="flex items-center justify-center py-12">
+                                        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+                                    </div>
+                                ) : (
+                                    <div className="space-y-4">
+                                        {selectedRequestDetails.map((req) => (
+                                            <div key={req.id} className="rounded-lg border border-slate-200 p-4 dark:border-navy-600">
+                                                <div className="mb-2 flex items-center justify-between">
+                                                    <span className="font-medium text-slate-700 dark:text-navy-100">
+                                                        {req.doc_number}
+                                                    </span>
+                                                    <span className="text-sm text-slate-500">
+                                                        {req.department?.name || req.dept_code}
+                                                    </span>
+                                                </div>
+                                                <p className="mb-2 text-sm text-slate-500">
+                                                    Pemohon: {req.requester?.full_name || req.requester?.email}
+                                                </p>
+                                                <div className="rounded-lg bg-slate-50 p-3 dark:bg-navy-600">
+                                                    <p className="mb-2 text-xs font-medium uppercase text-slate-500 dark:text-navy-300">Daftar Barang:</p>
+                                                    <ul className="space-y-1">
+                                                        {(req.items || []).map((item: any, idx: number) => (
+                                                            <li key={idx} className="flex items-center justify-between text-sm">
+                                                                <span className="text-slate-700 dark:text-navy-100">
+                                                                    {item.item?.name} ({item.item?.sku})
+                                                                </span>
+                                                                <span className="font-medium text-slate-600 dark:text-navy-200">
+                                                                    {item.quantity} {item.item?.unit}
+                                                                </span>
+                                                            </li>
+                                                        ))}
+                                                    </ul>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="flex justify-end gap-3 border-t border-slate-200 px-6 py-4 dark:border-navy-600">
+                                <button
+                                    onClick={() => setShowBulkApprovalModal(false)}
+                                    disabled={processing}
+                                    className="btn border border-slate-300 text-slate-600 hover:bg-slate-100 dark:border-navy-450 dark:text-navy-200"
+                                >
+                                    Batal
+                                </button>
+                                <button
+                                    onClick={handleBulkApproval}
+                                    disabled={processing || loadingDetails}
+                                    className="btn bg-success text-white hover:bg-success-focus disabled:opacity-50"
+                                >
+                                    {processing ? 'Memproses...' : `Setujui ${selectedRequests.size} Request`}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
+            {
+                showBulkHandoverModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+                        <div className="max-h-[80vh] w-full max-w-2xl overflow-hidden rounded-lg bg-white shadow-xl dark:bg-navy-700">
+                            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4 dark:border-navy-600">
+                                <h3 className="text-lg font-semibold text-slate-700 dark:text-navy-100">
+                                    Konfirmasi Serah Terima ({selectedForHandover.size} Request)
+                                </h3>
+                                <button
+                                    onClick={() => setShowBulkHandoverModal(false)}
+                                    className="rounded-lg p-1 text-slate-400 hover:bg-slate-100"
+                                >
+                                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+
+                            <div className="max-h-[50vh] overflow-y-auto p-6">
+                                {loadingHandoverDetails ? (
+                                    <div className="flex items-center justify-center py-12">
+                                        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+                                    </div>
+                                ) : (
+                                    <div className="space-y-4">
+                                        <div className="rounded-lg bg-warning/10 p-4 text-sm text-warning">
+                                            <strong>Perhatian:</strong> Stok barang akan dikurangi otomatis untuk semua request yang dipilih.
+                                        </div>
+
+                                        {handoverDetails.map((req) => (
+                                            <div key={req.id} className="rounded-lg border border-slate-200 p-4 dark:border-navy-600">
+                                                <div className="mb-2 flex items-center justify-between">
+                                                    <span className="font-medium text-slate-700 dark:text-navy-100">
+                                                        {req.doc_number}
+                                                    </span>
+                                                    <span className="text-sm text-slate-500">
+                                                        {req.department?.name || req.dept_code}
+                                                    </span>
+                                                </div>
+                                                <p className="mb-2 text-sm text-slate-500">
+                                                    Pemohon: {req.requester?.full_name || req.requester?.email}
+                                                </p>
+                                                <div className="rounded-lg bg-slate-50 p-3 dark:bg-navy-600">
+                                                    <p className="mb-2 text-xs font-medium uppercase text-slate-500 dark:text-navy-300">Daftar Barang:</p>
+                                                    <ul className="space-y-1">
+                                                        {(req.items || []).map((item: any, idx: number) => (
+                                                            <li key={idx} className="flex items-center justify-between text-sm">
+                                                                <div>
+                                                                    <span className="text-slate-700 dark:text-navy-100">
+                                                                        {item.item?.name}
+                                                                    </span>
+                                                                    <span className="ml-2 text-xs text-slate-400">
+                                                                        (Stok: {item.item?.current_stock})
+                                                                    </span>
+                                                                </div>
+                                                                <span className="font-medium text-slate-600 dark:text-navy-200">
+                                                                    {item.quantity} {item.item?.unit}
+                                                                </span>
+                                                            </li>
+                                                        ))}
+                                                    </ul>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="flex justify-end gap-3 border-t border-slate-200 px-6 py-4 dark:border-navy-600">
+                                <button
+                                    onClick={() => setShowBulkHandoverModal(false)}
+                                    disabled={processingHandover}
+                                    className="btn border border-slate-300 text-slate-600 hover:bg-slate-100 dark:border-navy-450 dark:text-navy-200"
+                                >
+                                    Batal
+                                </button>
+                                <button
+                                    onClick={handleBulkHandover}
+                                    disabled={processingHandover || loadingHandoverDetails}
+                                    className="btn bg-success text-white hover:bg-success-focus disabled:opacity-50"
+                                >
+                                    {processingHandover ? 'Memproses...' : `Serahkan ${selectedForHandover.size} Request`}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
+        </div >
     );
 }

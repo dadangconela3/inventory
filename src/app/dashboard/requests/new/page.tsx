@@ -42,6 +42,18 @@ export default function NewRequestPage() {
     const [nextSequence, setNextSequence] = useState(1);
     const [requestItems, setRequestItems] = useState<RequestItemRow[]>([]);
 
+    // New Item Modal State
+    const [showNewItemModal, setShowNewItemModal] = useState(false);
+    const [newItemName, setNewItemName] = useState('');
+    const [newItemFormData, setNewItemFormData] = useState({
+        name: '',
+        sku: '',
+        unit: 'pcs',
+        min_stock: 0,
+    });
+    const [savingNewItem, setSavingNewItem] = useState(false);
+    const [pendingRowId, setPendingRowId] = useState<string | null>(null);
+
     // Initialize first row
     useEffect(() => {
         if (requestItems.length === 0) {
@@ -223,17 +235,41 @@ export default function NewRequestPage() {
         label: `${item.name} (${item.sku}) - Stok: ${item.current_stock} ${item.unit}`,
     }));
 
-    // Create new item handler
+    // Open new item modal
     const handleCreateNewItem = async (inputValue: string): Promise<SelectOption | null> => {
+        // Open modal instead of auto-creating
+        setNewItemName(inputValue);
+        setNewItemFormData({
+            name: inputValue,
+            sku: `SKU-${Date.now()}`,
+            unit: 'pcs',
+            min_stock: 0,
+        });
+        setShowNewItemModal(true);
+        return null; // Return null, item will be added after modal submit
+    };
+
+    // Save new item from modal
+    const handleSaveNewItem = async () => {
+        if (!newItemFormData.name.trim()) {
+            alert('Nama barang harus diisi');
+            return;
+        }
+        if (!newItemFormData.sku.trim()) {
+            alert('SKU harus diisi');
+            return;
+        }
+
+        setSavingNewItem(true);
         try {
             const { data, error } = await supabase
                 .from('items')
                 .insert({
-                    name: inputValue,
-                    sku: `SKU-${Date.now()}`,
-                    unit: 'pcs',
+                    name: newItemFormData.name.trim(),
+                    sku: newItemFormData.sku.trim(),
+                    unit: newItemFormData.unit || 'pcs',
                     current_stock: 0,
-                    min_stock: 0,
+                    min_stock: newItemFormData.min_stock || 0,
                 })
                 .select()
                 .single();
@@ -241,20 +277,36 @@ export default function NewRequestPage() {
             if (error) {
                 console.error('Supabase error:', error);
                 alert(`Gagal menambahkan barang: ${error.message}`);
-                return null;
+                return;
             }
 
+            // Add to items list
             setItems(prev => [...prev, data]);
 
-            return {
-                value: data.id,
-                label: `${data.name} (${data.sku}) - Stok: 0 pcs`,
-            };
+            // Auto-select the new item in the first empty row or last row
+            const emptyRow = requestItems.find(r => !r.item_id);
+            if (emptyRow) {
+                updateItemRow(emptyRow.id, 'item_id', data.id);
+            }
+
+            // Close modal and reset
+            setShowNewItemModal(false);
+            setNewItemFormData({ name: '', sku: '', unit: 'pcs', min_stock: 0 });
+            setNewItemName('');
+
         } catch (error) {
             console.error('Error creating new item:', error);
             alert('Gagal menambahkan barang baru.');
-            return null;
+        } finally {
+            setSavingNewItem(false);
         }
+    };
+
+    // Cancel new item modal
+    const handleCancelNewItem = () => {
+        setShowNewItemModal(false);
+        setNewItemFormData({ name: '', sku: '', unit: 'pcs', min_stock: 0 });
+        setNewItemName('');
     };
 
     // Submit form
@@ -353,6 +405,30 @@ export default function NewRequestPage() {
                     .insert(requestItemsData);
 
                 if (itemsError) throw itemsError;
+
+                // Notify supervisor of this department
+                const { data: departmentData } = await supabase
+                    .from('departments')
+                    .select('id')
+                    .eq('code', deptCode)
+                    .single();
+
+                if (departmentData) {
+                    const { data: supervisors } = await supabase
+                        .from('profiles')
+                        .select('id')
+                        .eq('role', 'supervisor')
+                        .eq('department_id', departmentData.id);
+
+                    if (supervisors && supervisors.length > 0) {
+                        const notifications = supervisors.map(s => ({
+                            user_id: s.id,
+                            message: `Request baru ${docNumber} menunggu approval`,
+                            link: '/dashboard/approvals',
+                        }));
+                        await supabase.from('notifications').insert(notifications);
+                    }
+                }
             }
 
             // Success
@@ -491,8 +567,8 @@ export default function NewRequestPage() {
                         </button>
                     </div>
 
-                    {/* Items Table */}
-                    <div className="overflow-visible">
+                    {/* Items Table - Desktop */}
+                    <div className="hidden md:block overflow-visible">
                         <table className="w-full">
                             <thead>
                                 <tr className="border-b border-slate-200 dark:border-navy-600">
@@ -574,6 +650,79 @@ export default function NewRequestPage() {
                         </table>
                     </div>
 
+                    {/* Items Cards - Mobile */}
+                    <div className="md:hidden space-y-4">
+                        {requestItems.map((row, index) => (
+                            <div key={row.id} className="rounded-lg border border-slate-200 p-4 dark:border-navy-600">
+                                {/* Card Header */}
+                                <div className="mb-3 flex items-center justify-between">
+                                    <span className="text-sm font-medium text-slate-500 dark:text-navy-300">
+                                        Barang #{index + 1}
+                                    </span>
+                                    <button
+                                        type="button"
+                                        onClick={() => removeItemRow(row.id)}
+                                        disabled={requestItems.length === 1}
+                                        className="rounded-lg p-1.5 text-error transition-colors hover:bg-error/10 disabled:opacity-30"
+                                    >
+                                        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                        </svg>
+                                    </button>
+                                </div>
+
+                                {/* Item Select */}
+                                <div className="mb-3">
+                                    <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-navy-300">
+                                        Pilih Barang <span className="text-error">*</span>
+                                    </label>
+                                    <CreatableSelect
+                                        options={itemOptions}
+                                        value={row.item_id}
+                                        onChange={(value) => updateItemRow(row.id, 'item_id', value)}
+                                        onCreateNew={handleCreateNewItem}
+                                        placeholder="Ketik untuk mencari..."
+                                        createLabel="Tambah barang"
+                                    />
+                                </div>
+
+                                {/* Quantity & Department Row */}
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-navy-300">
+                                            Jumlah <span className="text-error">*</span>
+                                        </label>
+                                        <input
+                                            type="number"
+                                            min="1"
+                                            value={row.quantity}
+                                            onChange={(e) => updateItemRow(row.id, 'quantity', parseInt(e.target.value) || 1)}
+                                            className="form-input w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm dark:border-navy-450"
+                                            required
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-navy-300">
+                                            Departemen
+                                        </label>
+                                        <select
+                                            value={row.dept_code}
+                                            onChange={(e) => updateItemRow(row.id, 'dept_code', e.target.value)}
+                                            className="form-select w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm dark:border-navy-450"
+                                        >
+                                            <option value="">Default</option>
+                                            {filteredDepartments.map((dept) => (
+                                                <option key={dept.id} value={dept.code}>
+                                                    {dept.name}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
                     {/* Info Badge */}
                     <div className="mt-4 rounded-lg bg-info/10 p-3 text-sm text-info">
                         <p>
@@ -611,6 +760,121 @@ export default function NewRequestPage() {
                     </button>
                 </div>
             </form>
+
+            {/* New Item Modal */}
+            {showNewItemModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+                    <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-navy-700">
+                        <div className="mb-4 flex items-center justify-between">
+                            <h3 className="text-lg font-semibold text-slate-700 dark:text-navy-100">
+                                Tambah Barang Baru
+                            </h3>
+                            <button
+                                type="button"
+                                onClick={handleCancelNewItem}
+                                className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 dark:hover:bg-navy-600"
+                            >
+                                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+
+                        <div className="space-y-4">
+                            {/* Item Name */}
+                            <div>
+                                <label className="mb-1.5 block text-sm font-medium text-slate-600 dark:text-navy-100">
+                                    Nama Barang <span className="text-error">*</span>
+                                </label>
+                                <input
+                                    type="text"
+                                    value={newItemFormData.name}
+                                    onChange={(e) => setNewItemFormData({ ...newItemFormData, name: e.target.value })}
+                                    className="form-input w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 dark:border-navy-450"
+                                    placeholder="Contoh: Sarung Tangan Karet"
+                                    autoFocus
+                                />
+                            </div>
+
+                            {/* SKU */}
+                            <div>
+                                <label className="mb-1.5 block text-sm font-medium text-slate-600 dark:text-navy-100">
+                                    SKU / Kode Barang <span className="text-error">*</span>
+                                </label>
+                                <input
+                                    type="text"
+                                    value={newItemFormData.sku}
+                                    onChange={(e) => setNewItemFormData({ ...newItemFormData, sku: e.target.value })}
+                                    className="form-input w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 dark:border-navy-450"
+                                    placeholder="Contoh: GLV-001"
+                                />
+                            </div>
+
+                            {/* Unit & Min Stock */}
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="mb-1.5 block text-sm font-medium text-slate-600 dark:text-navy-100">
+                                        Satuan
+                                    </label>
+                                    <select
+                                        value={newItemFormData.unit}
+                                        onChange={(e) => setNewItemFormData({ ...newItemFormData, unit: e.target.value })}
+                                        className="form-select w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 dark:border-navy-450"
+                                    >
+                                        <option value="pcs">pcs</option>
+                                        <option value="pasang">pasang</option>
+                                        <option value="set">set</option>
+                                        <option value="box">box</option>
+                                        <option value="botol">botol</option>
+                                        <option value="pak">pak</option>
+                                        <option value="roll">roll</option>
+                                        <option value="kg">kg</option>
+                                        <option value="liter">liter</option>
+                                        <option value="meter">meter</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="mb-1.5 block text-sm font-medium text-slate-600 dark:text-navy-100">
+                                        Stok Minimum
+                                    </label>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        value={newItemFormData.min_stock}
+                                        onChange={(e) => setNewItemFormData({ ...newItemFormData, min_stock: parseInt(e.target.value) || 0 })}
+                                        className="form-input w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 dark:border-navy-450"
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Info */}
+                            <div className="rounded-lg bg-info/10 p-3 text-xs text-info">
+                                Stok awal akan diset ke 0. Anda dapat mengubah stok melalui menu Stok Barang.
+                            </div>
+                        </div>
+
+                        {/* Modal Actions */}
+                        <div className="mt-6 flex justify-end gap-3">
+                            <button
+                                type="button"
+                                onClick={handleCancelNewItem}
+                                disabled={savingNewItem}
+                                className="btn border border-slate-300 text-slate-600 hover:bg-slate-100 dark:border-navy-450 dark:text-navy-200"
+                            >
+                                Batal
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleSaveNewItem}
+                                disabled={savingNewItem}
+                                className="btn bg-primary text-white hover:bg-primary-focus disabled:opacity-50 dark:bg-accent"
+                            >
+                                {savingNewItem ? 'Menyimpan...' : 'Simpan Barang'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

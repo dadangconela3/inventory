@@ -1,19 +1,35 @@
 'use client';
 
-import { useState, memo } from 'react';
+import { useState, memo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
+import { useRealtimeNotifications } from '@/hooks/useRealtimeNotifications';
 
 interface HeaderProps {
     userName?: string;
-    notificationCount?: number;
 }
 
-function Header({ userName, notificationCount = 0 }: HeaderProps) {
+function Header({ userName }: HeaderProps) {
     const router = useRouter();
     const [showProfileMenu, setShowProfileMenu] = useState(false);
     const [showNotifications, setShowNotifications] = useState(false);
     const [isDarkMode, setIsDarkMode] = useState(false);
+    const [userId, setUserId] = useState<string | undefined>();
+
+    // Get user ID for notifications
+    useEffect(() => {
+        const getUserId = async () => {
+            const { data: { user } } = await supabase.auth.getUser();
+            setUserId(user?.id);
+        };
+        getUserId();
+    }, []);
+
+    // Use realtime notifications hook
+    const { notifications, unreadCount, markAsRead, markAllAsRead } = useRealtimeNotifications({
+        userId,
+    });
 
     const handleLogout = async () => {
         try {
@@ -38,6 +54,22 @@ function Header({ userName, notificationCount = 0 }: HeaderProps) {
             setIsDarkMode(true);
             localStorage.setItem('dark-mode', 'dark');
         }
+    };
+
+    const handleNotificationClick = async (notification: any) => {
+        // Mark as read
+        if (!notification.is_read) {
+            await markAsRead(notification.id);
+        }
+        // Navigate to link
+        if (notification.link) {
+            router.push(notification.link);
+            setShowNotifications(false);
+        }
+    };
+
+    const handleMarkAllAsRead = async () => {
+        await markAllAsRead();
     };
 
     return (
@@ -92,31 +124,61 @@ function Header({ userName, notificationCount = 0 }: HeaderProps) {
                                     d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
                                 />
                             </svg>
-                            {notificationCount > 0 && (
+                            {unreadCount > 0 && (
                                 <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-error text-xs font-medium text-white">
-                                    {notificationCount > 9 ? '9+' : notificationCount}
+                                    {unreadCount > 9 ? '9+' : unreadCount}
                                 </span>
                             )}
                         </button>
 
                         {/* Notification Dropdown */}
                         {showNotifications && (
-                            <div className="absolute right-0 top-12 w-80 rounded-lg border border-slate-150 bg-white shadow-lg dark:border-navy-600 dark:bg-navy-700">
+                            <div className="absolute right-0 top-12 w-96 rounded-lg border border-slate-150 bg-white shadow-lg dark:border-navy-600 dark:bg-navy-700">
                                 <div className="flex items-center justify-between border-b border-slate-150 p-4 dark:border-navy-500">
                                     <h3 className="font-semibold text-slate-700 dark:text-navy-100">Notifikasi</h3>
-                                    <button className="text-xs text-primary hover:underline dark:text-accent">
-                                        Tandai semua dibaca
-                                    </button>
+                                    {unreadCount > 0 && (
+                                        <button
+                                            onClick={handleMarkAllAsRead}
+                                            className="text-xs text-primary hover:underline dark:text-accent"
+                                        >
+                                            Tandai semua dibaca
+                                        </button>
+                                    )}
                                 </div>
-                                <div className="max-h-64 overflow-y-auto p-2">
-                                    {notificationCount === 0 ? (
-                                        <p className="p-4 text-center text-sm text-slate-400 dark:text-navy-300">
-                                            Tidak ada notifikasi baru
+                                <div className="max-h-96 overflow-y-auto">
+                                    {notifications.length === 0 ? (
+                                        <p className="p-8 text-center text-sm text-slate-400 dark:text-navy-300">
+                                            Tidak ada notifikasi
                                         </p>
                                     ) : (
-                                        <p className="p-4 text-center text-sm text-slate-400 dark:text-navy-300">
-                                            {notificationCount} notifikasi baru
-                                        </p>
+                                        <div className="divide-y divide-slate-100 dark:divide-navy-600">
+                                            {notifications.slice(0, 10).map((notification) => (
+                                                <button
+                                                    key={notification.id}
+                                                    onClick={() => handleNotificationClick(notification)}
+                                                    className={`w-full p-4 text-left transition-colors hover:bg-slate-50 dark:hover:bg-navy-600 ${!notification.is_read ? 'bg-primary/5 dark:bg-accent/5' : ''
+                                                        }`}
+                                                >
+                                                    <div className="flex items-start gap-3">
+                                                        <div className={`mt-1 h-2 w-2 rounded-full ${!notification.is_read ? 'bg-primary dark:bg-accent' : 'bg-slate-300 dark:bg-navy-400'
+                                                            }`} />
+                                                        <div className="flex-1">
+                                                            <p className="text-sm text-slate-700 dark:text-navy-100">
+                                                                {notification.message}
+                                                            </p>
+                                                            <p className="mt-1 text-xs text-slate-400 dark:text-navy-300">
+                                                                {new Date(notification.created_at).toLocaleString('id-ID', {
+                                                                    day: '2-digit',
+                                                                    month: 'short',
+                                                                    hour: '2-digit',
+                                                                    minute: '2-digit'
+                                                                })}
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                </button>
+                                            ))}
+                                        </div>
                                     )}
                                 </div>
                             </div>

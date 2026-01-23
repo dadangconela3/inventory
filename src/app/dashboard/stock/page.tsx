@@ -11,6 +11,7 @@ export default function StockManagementPage() {
     const [editingItem, setEditingItem] = useState<Item | null>(null);
     const [submitting, setSubmitting] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
+    const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
 
     // Form state
     const [formData, setFormData] = useState({
@@ -125,6 +126,49 @@ export default function StockManagementPage() {
 
     const lowStockItems = items.filter(item => item.current_stock <= item.min_stock);
 
+    const toggleSelectItem = (itemId: string) => {
+        const newSet = new Set(selectedItems);
+        if (newSet.has(itemId)) {
+            newSet.delete(itemId);
+        } else {
+            newSet.add(itemId);
+        }
+        setSelectedItems(newSet);
+    };
+
+    const toggleSelectAll = () => {
+        if (selectedItems.size === filteredItems.length) {
+            setSelectedItems(new Set());
+        } else {
+            setSelectedItems(new Set(filteredItems.map(i => i.id)));
+        }
+    };
+
+    const handleBatchDelete = async () => {
+        if (selectedItems.size === 0) return;
+
+        if (!confirm(`Apakah Anda yakin ingin menghapus ${selectedItems.size} barang?`)) return;
+
+        setSubmitting(true);
+        try {
+            const { error } = await supabase
+                .from('items')
+                .delete()
+                .in('id', Array.from(selectedItems));
+
+            if (error) throw error;
+
+            alert(`${selectedItems.size} barang berhasil dihapus!`);
+            setSelectedItems(new Set());
+            fetchItems();
+        } catch (error) {
+            console.error('Error batch deleting items:', error);
+            alert('Gagal menghapus barang');
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
     return (
         <div className="space-y-6">
             {/* Page Header */}
@@ -202,17 +246,31 @@ export default function StockManagementPage() {
 
             {/* Search */}
             <div className="card p-4">
-                <div className="relative">
-                    <input
-                        type="text"
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        placeholder="Cari berdasarkan nama atau SKU..."
-                        className="form-input w-full rounded-lg border border-slate-300 bg-transparent py-2 pl-10 pr-4 placeholder:text-slate-400/70 dark:border-navy-450"
-                    />
-                    <svg className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                    </svg>
+                <div className="flex items-center justify-between gap-4">
+                    {selectedItems.size > 0 && (
+                        <button
+                            onClick={handleBatchDelete}
+                            disabled={submitting}
+                            className="btn bg-error text-white hover:bg-error-focus disabled:opacity-50"
+                        >
+                            <svg className="mr-1 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                            Hapus ({selectedItems.size})
+                        </button>
+                    )}
+                    <div className="relative flex-1">
+                        <input
+                            type="text"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            placeholder="Cari berdasarkan nama atau SKU..."
+                            className="form-input w-full rounded-lg border border-slate-300 bg-transparent py-2 pl-10 pr-4 placeholder:text-slate-400/70 dark:border-navy-450"
+                        />
+                        <svg className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                    </div>
                 </div>
             </div>
 
@@ -222,6 +280,14 @@ export default function StockManagementPage() {
                     <table className="w-full">
                         <thead>
                             <tr className="border-b border-slate-150 dark:border-navy-600">
+                                <th className="px-5 py-4 text-left">
+                                    <input
+                                        type="checkbox"
+                                        checked={selectedItems.size === filteredItems.length && filteredItems.length > 0}
+                                        onChange={toggleSelectAll}
+                                        className="h-4 w-4 rounded border-2 border-slate-300 text-primary transition-all hover:border-primary focus:ring-2 focus:ring-primary/20 focus:ring-offset-0 checked:border-primary checked:bg-primary dark:border-navy-450 dark:checked:border-accent dark:checked:bg-accent"
+                                    />
+                                </th>
                                 <th className="px-5 py-4 text-left text-xs font-semibold uppercase text-slate-500 dark:text-navy-300">
                                     Nama Barang
                                 </th>
@@ -257,7 +323,15 @@ export default function StockManagementPage() {
                                 </tr>
                             ) : (
                                 filteredItems.map((item) => (
-                                    <tr key={item.id} className="border-b border-slate-100 last:border-0 dark:border-navy-700">
+                                    <tr key={item.id} className={`border-b border-slate-100 last:border-0 dark:border-navy-700 ${selectedItems.has(item.id) ? 'bg-primary/5 dark:bg-accent/5' : ''}`}>
+                                        <td className="px-5 py-4">
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedItems.has(item.id)}
+                                                onChange={() => toggleSelectItem(item.id)}
+                                                className="h-4 w-4 rounded border-2 border-slate-300 text-primary transition-all hover:border-primary focus:ring-2 focus:ring-primary/20 focus:ring-offset-0 checked:border-primary checked:bg-primary dark:border-navy-450 dark:checked:border-accent dark:checked:bg-accent"
+                                            />
+                                        </td>
                                         <td className="px-5 py-4">
                                             <span className="font-medium text-slate-700 dark:text-navy-100">
                                                 {item.name}
@@ -268,8 +342,8 @@ export default function StockManagementPage() {
                                         </td>
                                         <td className="px-5 py-4">
                                             <span className={`font-medium ${item.current_stock <= item.min_stock
-                                                    ? 'text-error'
-                                                    : 'text-slate-700 dark:text-navy-100'
+                                                ? 'text-error'
+                                                : 'text-slate-700 dark:text-navy-100'
                                                 }`}>
                                                 {item.current_stock.toLocaleString()}
                                             </span>
@@ -373,12 +447,13 @@ export default function StockManagementPage() {
                                         onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
                                         className="form-select w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 dark:border-navy-450"
                                     >
-                                        <option value="pcs">pcs</option>
-                                        <option value="pasang">pasang</option>
-                                        <option value="set">set</option>
-                                        <option value="unit">unit</option>
-                                        <option value="botol">botol</option>
-                                        <option value="buah">buah</option>
+                                        <option value="lusin">Lusin</option>
+                                        <option value="pcs">Pcs</option>
+                                        <option value="pasang">Pasang</option>
+                                        <option value="set">Set</option>
+                                        <option value="unit">Unit</option>
+                                        <option value="botol">Botol</option>
+                                        <option value="buah">Buah</option>
                                     </select>
                                 </div>
                             </div>

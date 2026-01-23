@@ -53,6 +53,11 @@ export default function DashboardPage() {
                 } else if (role === 'supervisor' || role === 'admin_dept') {
                     if (profile?.department?.code) {
                         allowedDeptCodes = [profile.department.code];
+
+                        // Special case: QC supervisor can see QC, QA, and PP
+                        if (profile.department.code === 'QC') {
+                            allowedDeptCodes = ['QC', 'QA', 'PP'];
+                        }
                     }
                 }
                 // HRGA sees all - no filter
@@ -124,6 +129,44 @@ export default function DashboardPage() {
         };
 
         fetchDashboardData();
+
+        // Subscribe to real-time changes
+        const requestsChannel = supabase
+            .channel('dashboard-requests-realtime')
+            .on(
+                'postgres_changes',
+                {
+                    event: '*',
+                    schema: 'public',
+                    table: 'requests',
+                },
+                (payload) => {
+                    console.log('Request change detected on dashboard:', payload);
+                    fetchDashboardData();
+                }
+            )
+            .subscribe();
+
+        const itemsChannel = supabase
+            .channel('dashboard-items-realtime')
+            .on(
+                'postgres_changes',
+                {
+                    event: '*',
+                    schema: 'public',
+                    table: 'items',
+                },
+                (payload) => {
+                    console.log('Item change detected on dashboard:', payload);
+                    fetchDashboardData();
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(requestsChannel);
+            supabase.removeChannel(itemsChannel);
+        };
     }, []);
 
     const getStatusBadge = (status: RequestStatus) => {
