@@ -1,0 +1,262 @@
+@layer theme, base, components, pages, utilities;
+
+@import "tailwindcss";
+
+/* Lineone Theme Variables - Custom Colors and Design Tokens */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /* Typography */
+  --font-sans: "Poppins", ui-sans-serif, system-ui, sans-serif,
+    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --font-inter: "Inter", sans-serif;
+
+  /* Navy Colors (Dark Mode Primary) */
+  --color-navy-50: #e7e9ef;
+  --color-navy-100: #c2c9d6;
+  --color-navy-200: #a3adc2;
+  --color-navy-300: #697a9b;
+  --color-navy-400: #5c6b8a;
+  --color-navy-450: #465675;
+  --color-navy-500: #384766;
+  --color-navy-600: #313e59;
+  --color-navy-700: #26334d;
+  --color-navy-750: #222e45;
+  --color-navy-800: #202b40;
+  --color-navy-900: #192132;
+
+  /* Slate Extension */
+  --color-slate-150: #e9eef5;
+
+  /* Primary (Indigo-based) */
+  --color-primary: #4f46e5;
+  --color-primary-focus: #4338ca;
+
+  /* Secondary (Pink/Magenta) */
+  --color-secondary-light: #ff57d8;
+  --color-secondary: #f000b9;
+  --color-secondary-focus: #bd0090;
+
+  /* Accent (Indigo variant) */
+  --color-accent-light: #818cf8;
+  --color-accent: #5f5af6;
+  --color-accent-focus: #4d47f5;
+
+  /* Semantic Colors */
+  --color-info: #0ea5e9;
+  --color-info-focus: #0284c7;
+
+  --color-success: #10b981;
+  --color-success-focus: #059669;
+
+  --color-warning: #ff9800;
+  --color-warning-focus: #e68200;
+
+  --color-error: #ff5724;
+  --color-error-focus: #f03000;
+
+  /* Shadows */
+  --shadow-soft: 0 3px 10px 0 rgb(48 46 56 / 6%);
+  --shadow-soft-dark: 0 3px 10px 0 rgb(25 33 50 / 30%);
+
+  /* Custom Text Sizes */
+  --text-tiny: 0.625rem;
+  --text-tiny--line-height: 0.8125rem;
+
+  --text-tiny-plus: 0.6875rem;
+  --text-tiny-plus--line-height: 0.875rem;
+
+  --text-xs-plus: 0.8125rem;
+  --text-xs-plus--line-height: 1.125rem;
+
+  --text-sm-plus: 0.9375rem;
+  --text-sm-plus--line-height: 1.375rem;
+
+  /* Animations */
+  --animate-shimmer: shimmer 2s linear infinite;
+
+  @keyframes fade-out {
+    0% {
+      opacity: 1;
+      visibility: visible;
+    }
+    100% {
+      opacity: 0;
+      visibility: hidden;
+    }
+  }
+
+  @keyframes shimmer {
+    from {
+      background-position: 0 0;
+    }
+    to {
+      background-position: -200% 0;
+    }
+  }
+}
+
+/* Layout Variables */
+:root {
+  --margin-x: 1rem;
+  --main-sidebar-width: 4.5rem;
+  --sidebar-panel-width: 230px;
+  --sidebar-panel-min-width: 64px;
+  --ease-in: 0.4, 0, 1, 1;
+  --ease-out: 0, 0, 0.2, 1;
+  --ease-in-out: 0.4, 0, 0.2, 1;
+}
+
+@media (min-width: 768px) {
+  :root {
+    --margin-x: 1.5rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --main-sidebar-width: 5rem;
+    --sidebar-panel-width: 240px;
+  }
+}
+
+@media (min-width: 1280px) {
+  :root {
+    --margin-x: 4rem;
+  }
+}
+
+/* Border color reset */
+*,
+::after,
+::before,
+::backdrop,
+::file-selector-button {
+  border-color: var(--color-gray-200, currentColor);
+}
+
+/* Base HTML Styling */
+html {
+  height: 100%;
+  overflow-x: hidden;
+  text-rendering: optimizeLegibility;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-slate-50 font-sans text-sm leading-5 text-slate-500 antialiased dark:bg-navy-900 dark:text-navy-200;
+}
+
+/* Cloak - Hide until JS loads */
+.cloak {
+  display: none !important;
+}
+
+/* Button Base */
+.btn {
+  @apply inline-flex cursor-pointer items-center justify-center rounded-lg px-5 py-2
+   text-center tracking-wide outline-hidden transition-all duration-200
+   focus:outline-hidden disabled:pointer-events-none disabled:opacity-50;
+}
+
+/* Form Elements */
+.form-input,
+.form-textarea,
+.form-select,
+.form-multiselect,
+.form-radio,
+.form-checkbox,
+.form-switch,
+.form-checkbox::before,
+.form-radio::before,
+.form-switch::before {
+  @apply transition-all duration-200 ease-in-out;
+}
+
+.form-input,
+.form-textarea,
+.form-select,
+.form-multiselect {
+  @apply appearance-none tracking-wide outline-hidden placeholder:font-light focus:outline-hidden;
+  contain: paint;
+}
+
+.form-checkbox,
+.form-radio {
+  @apply relative shrink-0 cursor-pointer select-none appearance-none overflow-hidden outline-hidden focus:outline-hidden;
+  print-color-adjust: exact;
+}
+
+.form-checkbox.is-basic,
+.form-radio.is-basic {
+  @apply inline-block border ease-out before:absolute before:inset-0 before:h-full 
+  before:w-full before:scale-0 checked:before:scale-100 hover:shadow-lg;
+}
+
+/* Card Base */
+.card {
+  @apply rounded-lg bg-white shadow-soft dark:bg-navy-700 dark:shadow-soft-dark;
+}
+
+/* Scrollbar Styles */
+.is-scrollbar-hidden {
+  scrollbar-width: none; /* Firefox */
+}
+
+.is-scrollbar-hidden::-webkit-scrollbar {
+  display: none;
+}
+
+@supports selector(::-webkit-scrollbar) {
+  .scrollbar-sm::-webkit-scrollbar {
+    width: 0.375rem;
+    height: 0.375rem;
+  }
+
+  .scrollbar-sm:hover::-webkit-scrollbar-thumb,
+  .scrollbar-sm:focus-within::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-slate-300/80 dark:bg-navy-400;
+  }
+
+  .scrollbar-sm::-webkit-scrollbar-thumb:hover {
+    @apply bg-slate-400 dark:bg-navy-300;
+  }
+}
+
+/* 100vh Fix for Mobile */
+.h-100vh {
+  height: 100vh;
+  height: calc(var(--vh, 1vh) * 100);
+}
+
+.min-h-100vh {
+  min-height: 100vh;
+  min-height: calc(var(--vh, 1vh) * 100);
+}
+
+/* Avatar Base */
+.avatar {
+  @apply relative inline-flex shrink-0;
+}
+
+.avatar img {
+  @apply h-full w-full object-cover;
+}
+
+/* Badge */
+.badge {
+  @apply inline-flex items-center justify-center rounded-full px-2 py-0.5 text-xs font-medium;
+}
+
+/* Spinner */
+.spinner {
+  @apply relative inline-block;
+}
+
+.spinner::before {
+  @apply absolute inset-0 animate-spin rounded-full border-2 border-current border-r-transparent content-[''];
+}
