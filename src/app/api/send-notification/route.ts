@@ -123,10 +123,19 @@ export async function POST(request: NextRequest) {
             total: subscriptions.length,
             results,
         });
-    } catch (error) {
+    } catch (error: any) {
         console.error('Error in send notification endpoint:', error);
+        
+        // Return more specific error messages
+        let errorMessage = 'Internal server error';
+        if (error.message?.includes('Missing Supabase')) {
+            errorMessage = 'Supabase configuration error. Check environment variables.';
+        } else if (error.message?.includes('Missing VAPID')) {
+            errorMessage = 'VAPID keys not configured. Check environment variables.';
+        }
+        
         return NextResponse.json(
-            { error: 'Internal server error' },
+            { error: errorMessage, details: error.message },
             { status: 500 }
         );
     }

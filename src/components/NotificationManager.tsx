@@ -152,7 +152,7 @@ export default function NotificationManager() {
         <>
             {/* Permission Prompt Toast */}
             {showPrompt && permission === 'default' && (
-                <div className="fixed bottom-4 right-4 z-50 max-w-sm rounded-lg bg-white p-4 shadow-lg dark:bg-navy-800">
+                <div className="fixed bottom-4 right-4 z-[9999] max-w-sm rounded-lg bg-white p-4 shadow-2xl ring-1 ring-black/5 dark:bg-navy-800">
                     <div className="flex items-start gap-3">
                         <div className="flex-shrink-0">
                             <svg className="h-6 w-6 text-primary dark:text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -169,13 +169,15 @@ export default function NotificationManager() {
                             <div className="mt-3 flex gap-2">
                                 <button
                                     onClick={requestPermission}
-                                    className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-focus dark:bg-accent dark:hover:bg-accent-focus"
+                                    type="button"
+                                    className="cursor-pointer rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-focus active:scale-95 dark:bg-accent dark:hover:bg-accent-focus"
                                 >
                                     Aktifkan
                                 </button>
                                 <button
                                     onClick={() => setShowPrompt(false)}
-                                    className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-navy-450 dark:text-navy-200 dark:hover:bg-navy-600"
+                                    type="button"
+                                    className="cursor-pointer rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 active:scale-95 dark:border-navy-450 dark:text-navy-200 dark:hover:bg-navy-600"
                                 >
                                     Nanti
                                 </button>
@@ -183,7 +185,8 @@ export default function NotificationManager() {
                         </div>
                         <button
                             onClick={() => setShowPrompt(false)}
-                            className="flex-shrink-0 text-slate-400 hover:text-slate-600 dark:text-navy-300 dark:hover:text-navy-100"
+                            type="button"
+                            className="cursor-pointer flex-shrink-0 text-slate-400 hover:text-slate-600 dark:text-navy-300 dark:hover:text-navy-100"
                         >
                             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
