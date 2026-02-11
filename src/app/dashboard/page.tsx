@@ -4,8 +4,6 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { Request, RequestStatus, Profile, UserRole, PRODUCTION_DEPARTMENTS, INDIRECT_DEPARTMENTS } from '@/types/database';
-import TestPushNotification from '@/components/TestPushNotification';
-import TestDepartmentNotification from '@/components/TestDepartmentNotification';
 
 interface DashboardStats {
     pendingRequests: number;
@@ -479,14 +477,6 @@ export default function DashboardPage() {
                     </table>
                 </div>
             </div>
-
-            {/* Test Department Notification - For Admins */}
-            {(userProfile?.role === 'admin_produksi' || userProfile?.role === 'admin_indirect') && (
-                <TestDepartmentNotification />
-            )}
-
-            {/* Test Push Notification - For All Users */}
-            <TestPushNotification />
         </div>
     );
 }
