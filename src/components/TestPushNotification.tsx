@@ -18,81 +18,124 @@ function urlBase64ToUint8Array(base64String: string) {
     return outputArray;
 }
 
+async function getServiceWorkerRegistration(): Promise<ServiceWorkerRegistration> {
+    // Check if the correct SW (sw-custom.js) is registered
+    const existingReg = await navigator.serviceWorker.getRegistration();
+    if (existingReg?.active) {
+        // Check if it's our custom SW by checking the script URL
+        if (existingReg.active.scriptURL.includes('sw-custom.js')) {
+            console.log('Using existing custom service worker');
+            return existingReg;
+        }
+        // Wrong SW registered, unregister it first
+        console.log('Unregistering old service worker:', existingReg.active.scriptURL);
+        await existingReg.unregister();
+    }
+
+    // Try to register sw-custom.js (wrapper that includes push handlers)
+    console.log('Registering service worker manually...');
+    const registration = await navigator.serviceWorker.register('/sw-custom.js');
+
+    // Wait for it to become active (with timeout)
+    return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+            reject(new Error('Service worker activation timed out. Run "npm run build && npm start" to generate the service worker.'));
+        }, 10000);
+
+        if (registration.active) {
+            clearTimeout(timeout);
+            resolve(registration);
+            return;
+        }
+
+        const sw = registration.installing || registration.waiting;
+        if (sw) {
+            sw.addEventListener('statechange', () => {
+                if (sw.state === 'activated') {
+                    clearTimeout(timeout);
+                    resolve(registration);
+                }
+            });
+        } else {
+            clearTimeout(timeout);
+            reject(new Error('No service worker found. Run "npm run build && npm start" first.'));
+        }
+    });
+}
+
 export default function TestPushNotification() {
     const [sending, setSending] = useState(false);
     const [subscribing, setSubscribing] = useState(false);
     const [message, setMessage] = useState('');
     const [permission, setPermission] = useState<NotificationPermission>('default');
     const [isSubscribed, setIsSubscribed] = useState(false);
+    const [swStatus, setSwStatus] = useState<'checking' | 'ready' | 'not-found'>('checking');
 
     useEffect(() => {
         if ('Notification' in window) {
             setPermission(Notification.permission);
-            checkSubscription();
+        }
+        // Check SW status
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistration().then((reg) => {
+                if (reg?.active) {
+                    setSwStatus('ready');
+                    // Check existing push subscription
+                    reg.pushManager.getSubscription().then((sub) => {
+                        setIsSubscribed(!!sub);
+                        console.log('Push subscription status:', !!sub);
+                    });
+                } else {
+                    setSwStatus('not-found');
+                    console.log('No active service worker found');
+                }
+            });
         }
     }, []);
 
-    const checkSubscription = async () => {
-        try {
-            if ('serviceWorker' in navigator) {
-                const registration = await navigator.serviceWorker.ready;
-                const subscription = await registration.pushManager.getSubscription();
-                setIsSubscribed(!!subscription);
-                console.log('Subscription status:', !!subscription);
-            }
-        } catch (error) {
-            console.error('Error checking subscription:', error);
-        }
-    };
-
-    const requestPermissionAndSubscribe = async () => {
+    const registerAndSubscribe = async () => {
         setSubscribing(true);
         setMessage('');
         try {
-            console.log('Requesting notification permission...');
-            const perm = await Notification.requestPermission();
-            setPermission(perm);
-            console.log('Permission result:', perm);
-
-            if (perm === 'granted') {
-                await subscribe();
-            } else {
-                setMessage('❌ Notification permission denied');
+            // Step 1: Request notification permission
+            if (Notification.permission !== 'granted') {
+                console.log('Requesting notification permission...');
+                const perm = await Notification.requestPermission();
+                setPermission(perm);
+                console.log('Permission result:', perm);
+                if (perm !== 'granted') {
+                    setMessage('❌ Notification permission denied by browser');
+                    return;
+                }
             }
-        } catch (error) {
-            console.error('Error requesting permission:', error);
-            setMessage('❌ Error requesting permission');
-        } finally {
-            setSubscribing(false);
-        }
-    };
 
-    const subscribe = async () => {
-        setSubscribing(true);
-        setMessage('');
-        try {
-            console.log('Starting subscription process...');
-            
+            // Step 2: Get or register service worker
+            console.log('Getting service worker registration...');
+            setMessage('⏳ Registering service worker...');
+            const registration = await getServiceWorkerRegistration();
+            setSwStatus('ready');
+            console.log('Service worker ready:', registration.scope);
+
+            // Step 3: Get current user
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) {
                 setMessage('❌ User not logged in');
-                setSubscribing(false);
                 return;
             }
             console.log('User ID:', user.id);
 
-            console.log('Waiting for service worker...');
-            const registration = await navigator.serviceWorker.ready;
-            console.log('Service worker ready');
-
+            // Step 4: Subscribe to push manager
             console.log('Subscribing to push manager...');
+            setMessage('⏳ Subscribing to push notifications...');
             const subscription = await registration.pushManager.subscribe({
                 userVisibleOnly: true,
                 applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
             });
             console.log('Push subscription created:', subscription.endpoint);
 
+            // Step 5: Save to backend
             console.log('Saving subscription to backend...');
+            setMessage('⏳ Saving subscription...');
             const response = await fetch('/api/push-subscription', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -108,14 +151,12 @@ export default function TestPushNotification() {
             if (response.ok) {
                 setIsSubscribed(true);
                 setMessage('✅ Successfully subscribed to notifications!');
-                console.log('Subscription successful!');
             } else {
                 setMessage(`❌ Failed to save subscription: ${data.error || 'Unknown error'}`);
-                console.error('Backend error:', data);
             }
         } catch (error) {
-            console.error('Error subscribing:', error);
-            setMessage(`❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            console.error('Error in subscribe flow:', error);
+            setMessage(`❌ ${error instanceof Error ? error.message : 'Unknown error'}`);
         } finally {
             setSubscribing(false);
         }
@@ -126,7 +167,6 @@ export default function TestPushNotification() {
         setMessage('');
 
         try {
-            // Get current user
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) {
                 setMessage('❌ User not logged in');
@@ -134,12 +174,9 @@ export default function TestPushNotification() {
                 return;
             }
 
-            // Send test notification
             const response = await fetch('/api/send-notification', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     userId: user.id,
                     title: '🧪 Test Notification',
@@ -152,17 +189,12 @@ export default function TestPushNotification() {
             const data = await response.json();
 
             if (response.ok) {
-                // Check if there's a message (no subscriptions case)
                 if (data.message) {
-                    setMessage('⚠️ No push subscriptions found. Please allow notifications first!');
-                } else if (data.sent !== undefined && data.total !== undefined) {
-                    if (data.sent === 0 && data.total === 0) {
-                        setMessage('⚠️ No push subscriptions found. Please allow notifications first!');
-                    } else {
-                        setMessage(`✅ Notification sent! (${data.sent}/${data.total} subscriptions)`);
-                    }
+                    setMessage('⚠️ No push subscriptions found. Please subscribe first!');
+                } else if (data.sent !== undefined) {
+                    setMessage(`✅ Notification sent! (${data.sent}/${data.total} subscriptions)`);
                 } else {
-                    setMessage('⚠️ Unexpected response format');
+                    setMessage('⚠️ Unexpected response');
                     console.error('Unexpected data:', data);
                 }
             } else {
@@ -184,18 +216,29 @@ export default function TestPushNotification() {
                 <h3 className="font-semibold text-slate-700 dark:text-navy-100">
                     Test Push Notification
                 </h3>
+                {swStatus === 'ready' && (
+                    <span className="ml-auto rounded-full bg-success/10 px-2 py-0.5 text-xs text-success">
+                        SW Active
+                    </span>
+                )}
+                {swStatus === 'not-found' && (
+                    <span className="ml-auto rounded-full bg-warning/10 px-2 py-0.5 text-xs text-warning">
+                        SW Not Found
+                    </span>
+                )}
             </div>
             
             <p className="mb-4 text-sm text-slate-600 dark:text-navy-300">
-                Send a test push notification to yourself. Make sure you&apos;ve allowed notifications first!
+                Test push notification flow: subscribe &amp; send a test notification to yourself.
             </p>
 
-            {/* Subscribe Button if not subscribed */}
-            {permission !== 'granted' && (
+            {/* Step 1: Subscribe */}
+            {!isSubscribed && (
                 <button
-                    onClick={requestPermissionAndSubscribe}
+                    onClick={registerAndSubscribe}
                     disabled={subscribing}
-                    className="mb-3 btn bg-success text-white hover:bg-success-focus w-full disabled:opacity-50"
+                    type="button"
+                    className="mb-3 w-full cursor-pointer rounded-lg bg-green-600 px-4 py-3 text-sm font-medium text-white hover:bg-green-700 active:scale-[0.98] disabled:opacity-50"
                 >
                     {subscribing ? (
                         <span className="flex items-center gap-2 justify-center">
@@ -203,39 +246,20 @@ export default function TestPushNotification() {
                                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                             </svg>
-                            Subscribing...
+                            Processing...
                         </span>
                     ) : (
-                        '🔔 Allow Notifications First'
+                        '🔔 Step 1: Allow & Subscribe to Notifications'
                     )}
                 </button>
             )}
 
-            {permission === 'granted' && !isSubscribed && (
-                <button
-                    onClick={subscribe}
-                    disabled={subscribing}
-                    className="mb-3 btn bg-success text-white hover:bg-success-focus w-full disabled:opacity-50"
-                >
-                    {subscribing ? (
-                        <span className="flex items-center gap-2 justify-center">
-                            <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                            </svg>
-                            Subscribing...
-                        </span>
-                    ) : (
-                        '✅ Subscribe to Push Notifications'
-                    )}
-                </button>
-            )}
-
-            {/* Test Button */}
+            {/* Step 2: Send Test */}
             <button
                 onClick={sendTestNotification}
                 disabled={sending || !isSubscribed}
-                className="btn bg-primary text-white hover:bg-primary-focus disabled:opacity-50 dark:bg-accent dark:hover:bg-accent-focus w-full"
+                type="button"
+                className="w-full cursor-pointer rounded-lg bg-blue-600 px-4 py-3 text-sm font-medium text-white hover:bg-blue-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
             >
                 {sending ? (
                     <span className="flex items-center gap-2 justify-center">
@@ -245,16 +269,23 @@ export default function TestPushNotification() {
                         </svg>
                         Sending...
                     </span>
+                ) : isSubscribed ? (
+                    '📨 Step 2: Send Test Notification'
                 ) : (
-                    '🔔 Send Test Notification'
+                    '📨 Step 2: Send Test (subscribe first)'
                 )}
             </button>
 
+            {/* Status Message */}
             {message && (
                 <div className={`mt-3 rounded-lg p-3 text-sm ${
                     message.startsWith('✅') 
-                        ? 'bg-success/10 text-success' 
-                        : 'bg-error/10 text-error'
+                        ? 'bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400' 
+                        : message.startsWith('⏳')
+                        ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400'
+                        : message.startsWith('⚠️')
+                        ? 'bg-yellow-50 text-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-400'
+                        : 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400'
                 }`}>
                     {message}
                 </div>
@@ -262,12 +293,12 @@ export default function TestPushNotification() {
 
             <div className="mt-4 rounded-lg bg-slate-50 p-3 dark:bg-navy-600">
                 <p className="text-xs font-medium text-slate-500 dark:text-navy-300">
-                    💡 Testing Tips:
+                    💡 Info:
                 </p>
                 <ul className="mt-2 space-y-1 text-xs text-slate-600 dark:text-navy-200">
-                    <li>• <strong>App Open:</strong> Notification will show as toast in-app</li>
-                    <li>• <strong>App Background:</strong> Notification will show in system tray</li>
-                    <li>• <strong>App Closed (Android PWA):</strong> Notification will still appear!</li>
+                    <li>• Permission: <strong>{permission}</strong></li>
+                    <li>• Subscribed: <strong>{isSubscribed ? 'Yes' : 'No'}</strong></li>
+                    <li>• Service Worker: <strong>{swStatus}</strong></li>
                 </ul>
             </div>
         </div>

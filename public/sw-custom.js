@@ -1,17 +1,21 @@
-// This file will be imported by the service worker
-// Add push notification handlers
+// Custom Service Worker with Push Notification Support
+// This worker imports the next-pwa generated worker and adds push handlers
 
+// Import the next-pwa service worker
+importScripts('/sw.js');
+
+// Listen for push events
 self.addEventListener('push', function(event) {
-    console.log('[SW] Push event received');
+    console.log('[SW-Custom] Push event received');
     
     if (!event.data) {
-        console.log('[SW] No data in push event');
+        console.log('[SW-Custom] No data in push event');
         return;
     }
 
     try {
         const data = event.data.json();
-        console.log('[SW] Push data:', data);
+        console.log('[SW-Custom] Push data:', JSON.stringify(data));
         
         const title = data.title || 'Notification';
         const options = {
@@ -24,55 +28,46 @@ self.addEventListener('push', function(event) {
             vibrate: [200, 100, 200],
             tag: 'inventory-notification-' + Date.now(),
             requireInteraction: false,
-            timestamp: Date.now(),
         };
 
         event.waitUntil(
             self.registration.showNotification(title, options)
-                .then(() => console.log('[SW] Notification shown successfully'))
-                .catch(err => console.error('[SW] Failed to show notification:', err))
         );
     } catch (error) {
-        console.error('[SW] Error in push handler:', error);
+        console.error('[SW-Custom] Error handling push event:', error);
     }
 });
 
+// Listen for notification click events
 self.addEventListener('notificationclick', function(event) {
-    console.log('[SW] Notification click');
+    console.log('[SW-Custom] Notification clicked');
     event.notification.close();
 
     const urlToOpen = event.notification.data?.url || '/dashboard';
-    const fullUrl = new URL(urlToOpen, self.location.origin).href;
 
     event.waitUntil(
         clients.matchAll({
             type: 'window',
             includeUncontrolled: true
         }).then(function(clientList) {
-            // Try to find existing window with same URL
-            for (let client of clientList) {
-                if (client.url === fullUrl && 'focus' in client) {
-                    return client.focus();
-                }
-            }
-            // Try to find any window from same origin and navigate
-            for (let client of clientList) {
-                if (client.url.startsWith(self.location.origin) && 'focus' in client) {
+            for (let i = 0; i < clientList.length; i++) {
+                const client = clientList[i];
+                if (client.url.includes(self.location.origin) && 'focus' in client) {
                     return client.focus().then(() => {
-                        if ('navigate' in client) {
-                            return client.navigate(fullUrl);
-                        }
+                        return client.navigate(urlToOpen);
                     });
                 }
             }
-            // Open new window
             if (clients.openWindow) {
-                return clients.openWindow(fullUrl);
+                return clients.openWindow(urlToOpen);
             }
         })
     );
 });
 
+// Listen for notification close events
 self.addEventListener('notificationclose', function(event) {
-    console.log('[SW] Notification closed');
+    console.log('[SW-Custom] Notification closed:', event.notification.tag);
 });
+
+console.log('[SW-Custom] Custom service worker with push support loaded');

@@ -2,34 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import webpush from 'web-push';
 
-// Helper to get Supabase admin client
-function getSupabaseAdmin() {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    
-    if (!supabaseUrl || !supabaseServiceKey) {
-        throw new Error('Missing Supabase environment variables');
-    }
-    
-    return createClient(supabaseUrl, supabaseServiceKey);
-}
-
-// Helper to configure web push
-function configureWebPush() {
-    const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-    const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY;
-    
-    if (!vapidPublicKey || !vapidPrivateKey) {
-        throw new Error('Missing VAPID keys');
-    }
-    
-    webpush.setVapidDetails(
-        'mailto:admin@sakaeriken.com',
-        vapidPublicKey,
-        vapidPrivateKey
-    );
-}
-
 interface PushNotificationPayload {
     userId: string;
     title: string;
@@ -40,10 +12,6 @@ interface PushNotificationPayload {
 
 export async function POST(request: NextRequest) {
     try {
-        // Initialize Supabase and web push
-        const supabaseAdmin = getSupabaseAdmin();
-        configureWebPush();
-        
         const payload: PushNotificationPayload = await request.json();
         const { userId, title, body, link, icon } = payload;
 
@@ -54,26 +22,76 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Fetch user's push subscriptions
-        const { data: subscriptions, error } = await supabaseAdmin
-            .from('push_subscriptions')
-            .select('*')
-            .eq('user_id', userId);
-
-        if (error) {
-            console.error('Error fetching subscriptions:', error);
+        // Initialize Supabase
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+        const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+        
+        if (!supabaseUrl || !supabaseServiceKey) {
+            console.error('Missing env vars:', { 
+                hasUrl: !!supabaseUrl, 
+                hasKey: !!supabaseServiceKey 
+            });
             return NextResponse.json(
-                { error: 'Failed to fetch subscriptions' },
+                { error: 'Server configuration error' },
                 { status: 500 }
             );
         }
 
-        if (!subscriptions || subscriptions.length === 0) {
+        console.log('Supabase URL:', supabaseUrl);
+        const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+
+        // Fetch user's push subscriptions
+        console.log('Fetching subscriptions for user:', userId);
+        let subscriptions;
+        try {
+            const result = await supabaseAdmin
+                .from('push_subscriptions')
+                .select('*')
+                .eq('user_id', userId);
+            
+            if (result.error) {
+                console.error('Supabase query error:', result.error);
+                return NextResponse.json(
+                    { error: 'Failed to fetch subscriptions', details: result.error.message },
+                    { status: 500 }
+                );
+            }
+            subscriptions = result.data;
+        } catch (fetchError) {
+            console.error('Network error fetching subscriptions:', fetchError);
             return NextResponse.json(
-                { message: 'No subscriptions found for user' },
-                { status: 200 }
+                { error: 'Network error connecting to database', details: String(fetchError) },
+                { status: 500 }
             );
         }
+
+        console.log('Found subscriptions:', subscriptions?.length);
+
+        if (!subscriptions || subscriptions.length === 0) {
+            return NextResponse.json({
+                success: true,
+                sent: 0,
+                total: 0,
+                message: 'No subscriptions found for user',
+            });
+        }
+
+        // Configure web push
+        const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+        const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY;
+        
+        if (!vapidPublicKey || !vapidPrivateKey) {
+            return NextResponse.json(
+                { error: 'VAPID keys not configured' },
+                { status: 500 }
+            );
+        }
+        
+        webpush.setVapidDetails(
+            'mailto:admin@sakaeriken.com',
+            vapidPublicKey,
+            vapidPrivateKey
+        );
 
         // Prepare notification payload
         const notificationPayload = JSON.stringify({
@@ -87,7 +105,8 @@ export async function POST(request: NextRequest) {
         });
 
         // Send push notification to all user's subscriptions
-        const sendPromises = subscriptions.map(async (sub) => {
+        const results = [];
+        for (const sub of subscriptions) {
             try {
                 const pushSubscription = {
                     endpoint: sub.endpoint,
@@ -98,23 +117,25 @@ export async function POST(request: NextRequest) {
                 };
 
                 await webpush.sendNotification(pushSubscription, notificationPayload);
-                return { success: true, endpoint: sub.endpoint };
-            } catch (error: any) {
-                console.error('Error sending to subscription:', error);
+                results.push({ success: true, endpoint: sub.endpoint });
+                console.log('Notification sent to:', sub.endpoint.substring(0, 50) + '...');
+            } catch (sendError: unknown) {
+                const err = sendError as { statusCode?: number; message?: string };
+                console.error('Error sending to subscription:', err);
                 
                 // If subscription is invalid/expired, delete it
-                if (error.statusCode === 410 || error.statusCode === 404) {
+                if (err.statusCode === 410 || err.statusCode === 404) {
                     await supabaseAdmin
                         .from('push_subscriptions')
                         .delete()
                         .eq('id', sub.id);
+                    console.log('Deleted expired subscription:', sub.id);
                 }
                 
-                return { success: false, endpoint: sub.endpoint, error: error.message };
+                results.push({ success: false, endpoint: sub.endpoint, error: err.message });
             }
-        });
+        }
 
-        const results = await Promise.all(sendPromises);
         const successCount = results.filter(r => r.success).length;
 
         return NextResponse.json({
@@ -123,19 +144,10 @@ export async function POST(request: NextRequest) {
             total: subscriptions.length,
             results,
         });
-    } catch (error: any) {
+    } catch (error) {
         console.error('Error in send notification endpoint:', error);
-        
-        // Return more specific error messages
-        let errorMessage = 'Internal server error';
-        if (error.message?.includes('Missing Supabase')) {
-            errorMessage = 'Supabase configuration error. Check environment variables.';
-        } else if (error.message?.includes('Missing VAPID')) {
-            errorMessage = 'VAPID keys not configured. Check environment variables.';
-        }
-        
         return NextResponse.json(
-            { error: errorMessage, details: error.message },
+            { error: 'Internal server error', details: String(error) },
             { status: 500 }
         );
     }
