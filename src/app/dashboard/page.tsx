@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { Request, RequestStatus, Profile, UserRole, PRODUCTION_DEPARTMENTS, INDIRECT_DEPARTMENTS } from '@/types/database';
+import TestPushNotification from '@/components/TestPushNotification';
 
 interface DashboardStats {
     pendingRequests: number;
@@ -412,6 +413,9 @@ export default function DashboardPage() {
                     </div>
                 </div>
             )}
+
+            {/* Test Push Notification Button */}
+            <TestPushNotification />
 
             {/* Recent Requests Table */}
             <div className="card">
