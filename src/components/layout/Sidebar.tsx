@@ -180,6 +180,21 @@ const navItems: NavItem[] = [
         roles: ['hrga'],
     },
     {
+        name: 'Laporan Sarung Tangan',
+        href: '/dashboard/reports/gloves',
+        icon: (
+            <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path
+                    fillOpacity="0.3"
+                    d="M5 4C5 2.89543 5.89543 2 7 2H17C18.1046 2 19 2.89543 19 4V20C19 21.1046 18.1046 22 17 22H7C5.89543 22 5 21.1046 5 20V4Z"
+                    fill="currentColor"
+                />
+                <path d="M9 7H15M9 11H15M9 15H12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+        ),
+        roles: ['hrga'],
+    },
+    {
         name: 'Manajemen User',
         href: '/dashboard/users',
         icon: (

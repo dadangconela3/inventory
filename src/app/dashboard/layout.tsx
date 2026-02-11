@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Sidebar from '@/components/layout/Sidebar';
 import Header from '@/components/layout/Header';
+import NotificationManager from '@/components/NotificationManager';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { Profile, UserRole } from '@/types/database';
 
@@ -137,6 +138,9 @@ export default function DashboardLayout({
             <main className="pt-16 lg:pl-64">
                 {content}
             </main>
+
+            {/* Notification Manager */}
+            <NotificationManager />
         </div>
     );
 }

@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
-import { Request, RequestStatus, Profile, UserRole, PRODUCTION_DEPARTMENTS, INDIRECT_DEPARTMENTS, Department, RequestItem, Item } from '@/types/database';
+import { Request, RequestStatus, Profile, UserRole, PRODUCTION_DEPARTMENTS, INDIRECT_DEPARTMENTS, RequestItem, Item } from '@/types/database';
 
 interface RequestWithRelations extends Omit<Request, 'requester' | 'department' | 'items'> {
     requester?: { full_name: string; email: string };
@@ -602,10 +602,10 @@ export default function RequestsListPage() {
                                             </span>
                                         </td>
                                         <td className="px-5 py-4 text-sm text-slate-600 dark:text-navy-200">
-                                            {(request as any).department?.name || request.dept_code}
+                                            {request.department?.name || request.dept_code}
                                         </td>
                                         <td className="px-5 py-4 text-sm text-slate-600 dark:text-navy-200">
-                                            {(request as any).requester?.full_name || (request as any).requester?.email || '-'}
+                                            {request.requester?.full_name || request.requester?.email || '-'}
                                         </td>
                                         <td className="px-5 py-4">
                                             {getStatusBadge(request.status)}
@@ -681,7 +681,7 @@ export default function RequestsListPage() {
                                                 <div className="rounded-lg bg-slate-50 p-3 dark:bg-navy-600">
                                                     <p className="mb-2 text-xs font-medium uppercase text-slate-500 dark:text-navy-300">Daftar Barang:</p>
                                                     <ul className="space-y-1">
-                                                        {(req.items || []).map((item: any, idx: number) => (
+                                                        {(req.items || []).map((item, idx: number) => (
                                                             <li key={idx} className="flex items-center justify-between text-sm">
                                                                 <span className="text-slate-700 dark:text-navy-100">
                                                                     {item.item?.name} ({item.item?.sku})
@@ -764,7 +764,7 @@ export default function RequestsListPage() {
                                                 <div className="rounded-lg bg-slate-50 p-3 dark:bg-navy-600">
                                                     <p className="mb-2 text-xs font-medium uppercase text-slate-500 dark:text-navy-300">Daftar Barang:</p>
                                                     <ul className="space-y-1">
-                                                        {(req.items || []).map((item: any, idx: number) => (
+                                                        {(req.items || []).map((item, idx: number) => (
                                                             <li key={idx} className="flex items-center justify-between text-sm">
                                                                 <div>
                                                                     <span className="text-slate-700 dark:text-navy-100">

@@ -27,7 +27,7 @@ SET role = 'admin_produksi',
     department_id = (SELECT id FROM departments WHERE code = 'MOLDING' LIMIT 1)
 WHERE email = 'admin.produksi@demo.com';
 
--- Update profile untuk Admin Indirect (bisa akses PP, QC, QA, PPIC, Logistics)
+-- Update profile untuk Admin Indirect (bisa akses ASSEMBLY, PP, QC, QA, PPIC, Logistics)
 UPDATE profiles 
 SET role = 'admin_indirect', 
     full_name = 'Admin Indirect',
@@ -78,7 +78,7 @@ ORDER BY p.role, p.email;
 -- ROLE PERMISSIONS REFERENCE:
 -- =====================================================
 -- admin_produksi : Buat request untuk Molding, Plating, Painting 1, Painting 2
--- admin_indirect : Buat request untuk PP, QC, QA, PPIC, Logistics
+-- admin_indirect : Buat request untuk ASSEMBLY, PP, QC, QA, PPIC, Logistics
 -- admin_dept     : Buat request untuk departemen sendiri saja
 -- supervisor     : Approve/Reject request di departemennya
 -- hrga           : Master Stock, OCR Verify, Batch Scheduling, Reports, dll

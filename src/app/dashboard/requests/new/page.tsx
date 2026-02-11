@@ -27,7 +27,6 @@ export default function NewRequestPage() {
     const router = useRouter();
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
-    const [allDepartments, setAllDepartments] = useState<Department[]>([]);
     const [filteredDepartments, setFilteredDepartments] = useState<Department[]>([]);
     const [items, setItems] = useState<Item[]>([]);
     const [userProfile, setUserProfile] = useState<Profile | null>(null);
@@ -44,7 +43,7 @@ export default function NewRequestPage() {
 
     // New Item Modal State
     const [showNewItemModal, setShowNewItemModal] = useState(false);
-    const [newItemName, setNewItemName] = useState('');
+
     const [newItemFormData, setNewItemFormData] = useState({
         name: '',
         sku: '',
@@ -52,13 +51,14 @@ export default function NewRequestPage() {
         min_stock: 0,
     });
     const [savingNewItem, setSavingNewItem] = useState(false);
-    const [pendingRowId, setPendingRowId] = useState<string | null>(null);
+
 
     // Initialize first row
     useEffect(() => {
         if (requestItems.length === 0) {
             setRequestItems([{ id: generateId(), item_id: '', quantity: 1, dept_code: '' }]);
         }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     // Fetch profile, departments and items on mount
@@ -89,7 +89,6 @@ export default function NewRequestPage() {
                 ]);
 
                 const departments = deptRes.data || [];
-                setAllDepartments(departments);
                 setItems(itemRes.data || []);
 
                 // Filter departments based on role
@@ -161,7 +160,7 @@ export default function NewRequestPage() {
                 nextNum = seqData.last_number + 1;
             } else {
                 // No sequence yet, check existing requests to determine starting number
-                const { data: existingRequests, error: reqError } = await supabase
+                const { data: existingRequests } = await supabase
                     .from('requests')
                     .select('doc_number')
                     .like('doc_number', `REQ/%/${deptCode}/%/${year}`)
@@ -238,7 +237,6 @@ export default function NewRequestPage() {
     // Open new item modal
     const handleCreateNewItem = async (inputValue: string): Promise<SelectOption | null> => {
         // Open modal instead of auto-creating
-        setNewItemName(inputValue);
         setNewItemFormData({
             name: inputValue,
             sku: `SKU-${Date.now()}`,
@@ -292,7 +290,6 @@ export default function NewRequestPage() {
             // Close modal and reset
             setShowNewItemModal(false);
             setNewItemFormData({ name: '', sku: '', unit: 'pcs', min_stock: 0 });
-            setNewItemName('');
 
         } catch (error) {
             console.error('Error creating new item:', error);
@@ -306,7 +303,6 @@ export default function NewRequestPage() {
     const handleCancelNewItem = () => {
         setShowNewItemModal(false);
         setNewItemFormData({ name: '', sku: '', unit: 'pcs', min_stock: 0 });
-        setNewItemName('');
     };
 
     // Submit form
