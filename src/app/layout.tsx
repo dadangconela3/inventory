@@ -3,6 +3,8 @@ import { Poppins, Inter } from "next/font/google";
 import "./globals.css";
 import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
 import SubscriptionUserUpdater from "@/components/SubscriptionUserUpdater";
+import AuthStateManager from "@/components/AuthStateManager";
+
 
 const poppins = Poppins({
   variable: "--font-poppins",
@@ -53,6 +55,7 @@ export default function RootLayout({
       >
         <ServiceWorkerRegistration />
         <SubscriptionUserUpdater />
+        <AuthStateManager />
         {children}
       </body>
     </html>

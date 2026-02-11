@@ -2,23 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { subscribeToPush, unsubscribeFromPush } from '@/lib/push-subscription';
 
 const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || '';
-
-function urlBase64ToUint8Array(base64String: string) {
-    const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-    const base64 = (base64String + padding)
-        .replace(/-/g, '+')
-        .replace(/_/g, '/');
-
-    const rawData = window.atob(base64);
-    const outputArray = new Uint8Array(rawData.length);
-
-    for (let i = 0; i < rawData.length; ++i) {
-        outputArray[i] = rawData.charCodeAt(i);
-    }
-    return outputArray;
-}
 
 export default function NotificationManager() {
     const [isSupported, setIsSupported] = useState(false);
@@ -77,70 +63,21 @@ export default function NotificationManager() {
     };
 
     const subscribe = async () => {
-        try {
-            if (!userId) {
-                console.error('User not logged in');
-                return;
-            }
+        if (!userId) {
+            console.error('User not logged in');
+            return;
+        }
 
-            const registration = await navigator.serviceWorker.ready;
-            
-            // Subscribe to push notifications
-            const subscription = await registration.pushManager.subscribe({
-                userVisibleOnly: true,
-                applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
-            });
-
-            // Send subscription to backend
-            const response = await fetch('/api/push-subscription', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    subscription: subscription.toJSON(),
-                    userId,
-                }),
-            });
-
-            if (response.ok) {
-                setIsSubscribed(true);
-                console.log('Successfully subscribed to push notifications');
-            } else {
-                console.error('Failed to save subscription');
-            }
-        } catch (error) {
-            console.error('Error subscribing to push notifications:', error);
+        const success = await subscribeToPush(userId, VAPID_PUBLIC_KEY);
+        if (success) {
+            setIsSubscribed(true);
         }
     };
 
     const unsubscribe = async () => {
-        try {
-            if (!userId) return;
-
-            const registration = await navigator.serviceWorker.ready;
-            const subscription = await registration.pushManager.getSubscription();
-
-            if (subscription) {
-                await subscription.unsubscribe();
-
-                // Remove subscription from backend
-                await fetch('/api/push-subscription', {
-                    method: 'DELETE',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        endpoint: subscription.endpoint,
-                        userId,
-                    }),
-                });
-
-                setIsSubscribed(false);
-                console.log('Successfully unsubscribed from push notifications');
-            }
-        } catch (error) {
-            console.error('Error unsubscribing from push notifications:', error);
+        const success = await unsubscribeFromPush();
+        if (success) {
+            setIsSubscribed(false);
         }
     };
 
