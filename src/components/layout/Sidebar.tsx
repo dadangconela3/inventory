@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect, memo } from 'react';
+import { useState, memo } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
+import Image from 'next/image';
 import { UserRole } from '@/types/database';
 
 interface SidebarProps {
@@ -208,11 +209,6 @@ function Sidebar({ userRole, userName }: SidebarProps) {
     // Filter nav items based on user role
     const visibleItems = navItems.filter((item) => item.roles.includes(userRole));
 
-    // Close sidebar on route change (mobile)
-    useEffect(() => {
-        setIsOpen(false);
-    }, [pathname]);
-
     return (
         <>
             {/* Mobile Overlay */}
@@ -244,23 +240,15 @@ function Sidebar({ userRole, userName }: SidebarProps) {
             >
                 {/* Logo */}
                 <div className="flex h-16 items-center justify-center border-b border-slate-150 dark:border-navy-600">
-                    <div className="flex items-center space-x-2">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-white">
-                            <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                <path
-                                    d="M20 7H4C2.89543 7 2 7.89543 2 9V19C2 20.1046 2.89543 21 4 21H20C21.1046 21 22 20.1046 22 19V9C22 7.89543 21.1046 7 20 7Z"
-                                    fill="currentColor"
-                                />
-                                <path
-                                    d="M16 7V5C16 3.89543 15.1046 3 14 3H10C8.89543 3 8 3.89543 8 5V7"
-                                    stroke="white"
-                                    strokeWidth="2"
-                                />
-                            </svg>
-                        </div>
-                        <span className="text-lg font-semibold text-slate-700 dark:text-navy-100">
-                            Inventory
-                        </span>
+                    <div className="flex items-center justify-center px-4">
+                        <Image 
+                            src="/sakaeriken inventory.png" 
+                            alt="Sakaeriken Inventory Logo" 
+                            width={180}
+                            height={48}
+                            priority
+                            className="h-12 w-auto object-contain"
+                        />
                     </div>
                 </div>
 

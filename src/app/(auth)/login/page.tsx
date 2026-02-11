@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 
 export default function LoginPage() {
@@ -76,7 +77,7 @@ export default function LoginPage() {
                 router.replace('/dashboard');
                 router.refresh();
             }
-        } catch (err) {
+        } catch {
             setError('Terjadi kesalahan. Silakan coba lagi.');
         } finally {
             setLoading(false);
@@ -98,42 +99,15 @@ export default function LoginPage() {
                 <div className="w-full max-w-[26rem] p-4 sm:px-5">
                     {/* Header */}
                     <div className="text-center">
-                        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 dark:bg-accent/10">
-                            <svg
-                                className="h-10 w-10 text-primary dark:text-accent"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                xmlns="http://www.w3.org/2000/svg"
-                            >
-                                <path
-                                    d="M20 7H4C2.89543 7 2 7.89543 2 9V19C2 20.1046 2.89543 21 4 21H20C21.1046 21 22 20.1046 22 19V9C22 7.89543 21.1046 7 20 7Z"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                />
-                                <path
-                                    d="M16 7V5C16 3.89543 15.1046 3 14 3H10C8.89543 3 8 3.89543 8 5V7"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                />
-                                <path
-                                    d="M12 12V16"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                />
-                                <path
-                                    d="M8 14H16"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                />
-                            </svg>
+                        <div className="mx-auto flex h-24 w-60 items-center justify-center">
+                            <Image 
+                                src="/sakaeriken inventory.png"     
+                                alt="Sakaeriken Inventory Logo" 
+                                width={240}
+                                height={96}
+                                priority
+                                className="h-full w-full object-contain"
+                            />
                         </div>
                         <div className="mt-4">
                             <h2 className="text-2xl font-semibold text-slate-600 dark:text-navy-100">
