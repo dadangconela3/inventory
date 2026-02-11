@@ -5,6 +5,14 @@ import { supabase } from '@/lib/supabase';
 
 const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || '';
 
+interface SubscriptionInfo {
+    user_id: string;
+    endpoint: string;
+    created_at: string;
+    user_email?: string;
+    user_name?: string;
+}
+
 function urlBase64ToUint8Array(base64String: string) {
     const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
     const base64 = (base64String + padding)
@@ -42,27 +50,79 @@ export default function TestPushNotification() {
     const [permission, setPermission] = useState<NotificationPermission>('default');
     const [isSubscribed, setIsSubscribed] = useState(false);
     const [swStatus, setSwStatus] = useState<'checking' | 'ready' | 'not-found'>('checking');
+    const [subscriptionInfo, setSubscriptionInfo] = useState<SubscriptionInfo | null>(null);
+    const [currentUserId, setCurrentUserId] = useState<string>('');
+
+    const fetchSubscriptionInfo = async (endpoint: string) => {
+        try {
+            const { data, error } = await supabase
+                .from('push_subscriptions')
+                .select(`
+                    user_id,
+                    endpoint,
+                    created_at,
+                    profiles:user_id (
+                        email,
+                        full_name
+                    )
+                `)
+                .eq('endpoint', endpoint)
+                .single();
+
+            if (error) {
+                console.error('Error fetching subscription info:', error);
+                return null;
+            }
+
+            return {
+                user_id: data.user_id,
+                endpoint: data.endpoint,
+                created_at: data.created_at,
+                user_email: (data.profiles as any)?.email,
+                user_name: (data.profiles as any)?.full_name,
+            };
+        } catch (error) {
+            console.error('Error in fetchSubscriptionInfo:', error);
+            return null;
+        }
+    };
 
     useEffect(() => {
-        if ('Notification' in window) {
-            setPermission(Notification.permission);
-        }
-        // Check SW status
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.getRegistration().then((reg) => {
-                if (reg?.active) {
-                    setSwStatus('ready');
-                    // Check existing push subscription
-                    reg.pushManager.getSubscription().then((sub) => {
+        const init = async () => {
+            if ('Notification' in window) {
+                setPermission(Notification.permission);
+            }
+
+            // Get current user
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+                setCurrentUserId(user.id);
+            }
+
+            // Check SW status
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.getRegistration().then(async (reg) => {
+                    if (reg?.active) {
+                        setSwStatus('ready');
+                        // Check existing push subscription
+                        const sub = await reg.pushManager.getSubscription();
                         setIsSubscribed(!!sub);
-                        console.log('Push subscription status:', !!sub);
-                    });
-                } else {
-                    setSwStatus('not-found');
-                    console.log('No active service worker found');
-                }
-            });
-        }
+                        
+                        if (sub) {
+                            console.log('Push subscription status:', !!sub);
+                            // Fetch subscription info from database
+                            const info = await fetchSubscriptionInfo(sub.endpoint);
+                            setSubscriptionInfo(info);
+                        }
+                    } else {
+                        setSwStatus('not-found');
+                        console.log('No active service worker found');
+                    }
+                });
+            }
+        };
+
+        init();
     }, []);
 
     const registerAndSubscribe = async () => {
@@ -95,6 +155,7 @@ export default function TestPushNotification() {
                 return;
             }
             console.log('User ID:', user.id);
+            setCurrentUserId(user.id);
 
             // Step 4: Subscribe to push manager
             console.log('Subscribing to push manager...');
@@ -122,6 +183,9 @@ export default function TestPushNotification() {
 
             if (response.ok) {
                 setIsSubscribed(true);
+                // Fetch updated subscription info
+                const info = await fetchSubscriptionInfo(subscription.endpoint);
+                setSubscriptionInfo(info);
                 setMessage('✅ Successfully subscribed to notifications!');
             } else {
                 setMessage(`❌ Failed to save subscription: ${data.error || 'Unknown error'}`);
@@ -181,12 +245,14 @@ export default function TestPushNotification() {
         }
     };
 
+    const userIdMatch = subscriptionInfo && currentUserId && subscriptionInfo.user_id === currentUserId;
+
     return (
         <div className="rounded-lg border border-slate-200 bg-white p-4 dark:border-navy-600 dark:bg-navy-700">
             <div className="mb-3 flex items-center gap-2">
-                <span className="text-lg">🧪</span>
+                <span className="text-lg">🔔</span>
                 <h3 className="font-semibold text-slate-700 dark:text-navy-100">
-                    Test Push Notification
+                    Push Notification Subscription
                 </h3>
                 {swStatus === 'ready' && (
                     <span className="ml-auto rounded-full bg-success/10 px-2 py-0.5 text-xs text-success">
@@ -201,32 +267,69 @@ export default function TestPushNotification() {
             </div>
             
             <p className="mb-4 text-sm text-slate-600 dark:text-navy-300">
-                Test push notification flow: subscribe &amp; send a test notification to yourself.
+                Subscribe to receive push notifications on this device.
             </p>
 
-            {/* Step 1: Subscribe */}
-            {!isSubscribed && (
-                <button
-                    onClick={registerAndSubscribe}
-                    disabled={subscribing}
-                    type="button"
-                    className="mb-3 w-full cursor-pointer rounded-lg bg-green-600 px-4 py-3 text-sm font-medium text-white hover:bg-green-700 active:scale-[0.98] disabled:opacity-50"
-                >
-                    {subscribing ? (
-                        <span className="flex items-center gap-2 justify-center">
-                            <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                            </svg>
-                            Processing...
+            {/* Subscription Status Card */}
+            {isSubscribed && subscriptionInfo && (
+                <div className={`mb-4 rounded-lg border p-3 ${
+                    userIdMatch 
+                        ? 'border-success/30 bg-success/5' 
+                        : 'border-warning/30 bg-warning/5'
+                }`}>
+                    <div className="mb-2 flex items-center gap-2">
+                        <span className="text-sm font-medium text-slate-700 dark:text-navy-100">
+                            {userIdMatch ? '✅ Subscription Active' : '⚠️ Subscription Mismatch'}
                         </span>
-                    ) : (
-                        '🔔 Step 1: Allow & Subscribe to Notifications'
-                    )}
-                </button>
+                    </div>
+                    <div className="space-y-1 text-xs text-slate-600 dark:text-navy-300">
+                        <div>
+                            <strong>Registered User:</strong> {subscriptionInfo.user_name || 'Unknown'} ({subscriptionInfo.user_email})
+                        </div>
+                        <div>
+                            <strong>User ID:</strong> 
+                            <code className="ml-1 rounded bg-slate-100 px-1 dark:bg-navy-600">
+                                {subscriptionInfo.user_id.substring(0, 8)}...
+                            </code>
+                        </div>
+                        <div>
+                            <strong>Current User:</strong> 
+                            <code className="ml-1 rounded bg-slate-100 px-1 dark:bg-navy-600">
+                                {currentUserId.substring(0, 8)}...
+                            </code>
+                        </div>
+                        {!userIdMatch && (
+                            <div className="mt-2 rounded bg-warning/10 p-2 text-warning">
+                                ⚠️ Device subscribed to different user. Click subscribe to update.
+                            </div>
+                        )}
+                    </div>
+                </div>
             )}
 
-            {/* Step 2: Send Test */}
+            {/* Subscribe Button - Always visible */}
+            <button
+                onClick={registerAndSubscribe}
+                disabled={subscribing}
+                type="button"
+                className="mb-3 w-full cursor-pointer rounded-lg bg-green-600 px-4 py-3 text-sm font-medium text-white hover:bg-green-700 active:scale-[0.98] disabled:opacity-50"
+            >
+                {subscribing ? (
+                    <span className="flex items-center gap-2 justify-center">
+                        <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                        </svg>
+                        Processing...
+                    </span>
+                ) : isSubscribed ? (
+                    '🔄 Re-subscribe / Update Subscription'
+                ) : (
+                    '🔔 Allow & Subscribe to Notifications'
+                )}
+            </button>
+
+            {/* Send Test Button */}
             <button
                 onClick={sendTestNotification}
                 disabled={sending || !isSubscribed}
@@ -242,9 +345,9 @@ export default function TestPushNotification() {
                         Sending...
                     </span>
                 ) : isSubscribed ? (
-                    '📨 Step 2: Send Test Notification'
+                    '📨 Send Test Notification'
                 ) : (
-                    '📨 Step 2: Send Test (subscribe first)'
+                    '📨 Send Test (subscribe first)'
                 )}
             </button>
 
@@ -265,7 +368,7 @@ export default function TestPushNotification() {
 
             <div className="mt-4 rounded-lg bg-slate-50 p-3 dark:bg-navy-600">
                 <p className="text-xs font-medium text-slate-500 dark:text-navy-300">
-                    💡 Info:
+                    💡 Device Info:
                 </p>
                 <ul className="mt-2 space-y-1 text-xs text-slate-600 dark:text-navy-200">
                     <li>• Permission: <strong>{permission}</strong></li>
