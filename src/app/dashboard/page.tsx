@@ -412,11 +412,6 @@ export default function DashboardPage() {
                     </div>
                 </div>
             )}
-
-            {/* Test Push Notification Button */}
-            <TestPushNotification />
-
-            {/* Recent Requests Table */}
             <div className="card">
                 <div className="border-b border-slate-150 p-5 dark:border-navy-600">
                     <div className="flex items-center justify-between">
