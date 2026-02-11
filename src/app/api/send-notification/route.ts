@@ -2,17 +2,27 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import webpush from 'web-push';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+// Helper to get Supabase admin client
+function getSupabaseAdmin() {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    
+    if (!supabaseUrl || !supabaseServiceKey) {
+        throw new Error('Missing Supabase environment variables');
+    }
+    
+    return createClient(supabaseUrl, supabaseServiceKey);
+}
 
-// Create Supabase client with service role
-const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
-
-// Configure web-push with VAPID keys
-const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!;
-const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY!;
-
-if (vapidPublicKey && vapidPrivateKey) {
+// Helper to configure web push
+function configureWebPush() {
+    const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+    const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY;
+    
+    if (!vapidPublicKey || !vapidPrivateKey) {
+        throw new Error('Missing VAPID keys');
+    }
+    
     webpush.setVapidDetails(
         'mailto:admin@sakaeriken.com',
         vapidPublicKey,
@@ -30,6 +40,10 @@ interface PushNotificationPayload {
 
 export async function POST(request: NextRequest) {
     try {
+        // Initialize Supabase and web push
+        const supabaseAdmin = getSupabaseAdmin();
+        configureWebPush();
+        
         const payload: PushNotificationPayload = await request.json();
         const { userId, title, body, link, icon } = payload;
 

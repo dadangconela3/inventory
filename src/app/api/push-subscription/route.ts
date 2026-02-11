@@ -1,11 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-
-// Create Supabase client with service role for admin operations
-const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+// Helper to get Supabase admin client
+function getSupabaseAdmin() {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    
+    if (!supabaseUrl || !supabaseServiceKey) {
+        throw new Error('Missing Supabase environment variables');
+    }
+    
+    return createClient(supabaseUrl, supabaseServiceKey);
+}
 
 export async function POST(request: NextRequest) {
     try {
@@ -19,6 +25,7 @@ export async function POST(request: NextRequest) {
         }
 
         // Save subscription to database
+        const supabaseAdmin = getSupabaseAdmin();
         const { data, error } = await supabaseAdmin
             .from('push_subscriptions')
             .upsert({
@@ -62,6 +69,7 @@ export async function DELETE(request: NextRequest) {
         }
 
         // Delete subscription from database
+        const supabaseAdmin = getSupabaseAdmin();
         const { error } = await supabaseAdmin
             .from('push_subscriptions')
             .delete()
