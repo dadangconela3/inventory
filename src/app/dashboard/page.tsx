@@ -479,15 +479,14 @@ export default function DashboardPage() {
                     </table>
                 </div>
             </div>
+
+            {/* Test Department Notification - For Admins */}
+            {(userProfile?.role === 'admin_produksi' || userProfile?.role === 'admin_indirect') && (
+                <TestDepartmentNotification />
+            )}
+
+            {/* Test Push Notification - For All Users */}
+            <TestPushNotification />
         </div>
-
-        {/* Test Department Notification - For Admins */}
-        {(userProfile?.role === 'admin_produksi' || userProfile?.role === 'admin_indirect') && (
-            <TestDepartmentNotification />
-        )}
-
-        {/* Test Push Notification - For All Users */}
-        <TestPushNotification />
-    </div>
-);
+    );
 }
