@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Poppins, Inter } from "next/font/google";
 import "./globals.css";
 import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
+import SubscriptionUserUpdater from "@/components/SubscriptionUserUpdater";
 
 const poppins = Poppins({
   variable: "--font-poppins",
@@ -51,7 +52,12 @@ export default function RootLayout({
         className={`${poppins.variable} ${inter.variable} font-sans antialiased`}
       >
         <ServiceWorkerRegistration />
+        <SubscriptionUserUpdater />
         {children}
+      </body>
+    </html>
+  );
+}
       </body>
     </html>
   );
