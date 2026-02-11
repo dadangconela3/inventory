@@ -416,6 +416,8 @@ export default function NewRequestPage() {
                         .eq('role', 'supervisor')
                         .eq('department_id', departmentData.id);
 
+                    console.log(`[Notification] Found ${supervisors?.length || 0} supervisors for dept ${deptCode}`);
+
                     if (supervisors && supervisors.length > 0) {
                         const notifications = supervisors.map(s => ({
                             user_id: s.id,
@@ -424,14 +426,19 @@ export default function NewRequestPage() {
                         }));
                         await supabase.from('notifications').insert(notifications);
 
-                        // Send push notification to supervisors
+                        // Send push notification to ALL supervisors
                         const { sendPushNotification } = await import('@/lib/notifications');
-                        await sendPushNotification({
-                            title: '📋 Request Baru',
-                            body: `Request baru ${docNumber} menunggu approval Anda`,
-                            link: '/dashboard/approvals',
-                            userId: supervisors[0].id,
-                        });
+                        for (const supervisor of supervisors) {
+                            console.log(`[Notification] Sending push to supervisor: ${supervisor.full_name} (${supervisor.id})`);
+                            await sendPushNotification({
+                                title: '📋 Request Baru',
+                                body: `Request baru ${docNumber} menunggu approval Anda`,
+                                link: '/dashboard/approvals',
+                                userId: supervisor.id,
+                            });
+                        }
+                    } else {
+                        console.warn(`[Notification] No supervisors found for dept ${deptCode}`);
                     }
                 }
             }
