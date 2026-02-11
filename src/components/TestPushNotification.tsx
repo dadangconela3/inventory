@@ -18,48 +18,20 @@ function urlBase64ToUint8Array(base64String: string) {
     return outputArray;
 }
 
-async function getServiceWorkerRegistration(): Promise<ServiceWorkerRegistration> {
-    // Check if the correct SW (sw-custom.js) is registered
-    const existingReg = await navigator.serviceWorker.getRegistration();
-    if (existingReg?.active) {
-        // Check if it's our custom SW by checking the script URL
-        if (existingReg.active.scriptURL.includes('sw-custom.js')) {
-            console.log('Using existing custom service worker');
-            return existingReg;
-        }
-        // Wrong SW registered, unregister it first
-        console.log('Unregistering old service worker:', existingReg.active.scriptURL);
-        await existingReg.unregister();
-    }
-
-    // Try to register sw-custom.js (wrapper that includes push handlers)
-    console.log('Registering service worker manually...');
-    const registration = await navigator.serviceWorker.register('/sw-custom.js');
-
-    // Wait for it to become active (with timeout)
+async function waitForServiceWorker(): Promise<ServiceWorkerRegistration> {
     return new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
-            reject(new Error('Service worker activation timed out. Run "npm run build && npm start" to generate the service worker.'));
+            reject(new Error('Service worker not ready. Please refresh the page.'));
         }, 10000);
 
-        if (registration.active) {
+        navigator.serviceWorker.ready.then((registration) => {
             clearTimeout(timeout);
+            console.log('[TestPush] Service worker ready:', registration.active?.scriptURL);
             resolve(registration);
-            return;
-        }
-
-        const sw = registration.installing || registration.waiting;
-        if (sw) {
-            sw.addEventListener('statechange', () => {
-                if (sw.state === 'activated') {
-                    clearTimeout(timeout);
-                    resolve(registration);
-                }
-            });
-        } else {
+        }).catch((error) => {
             clearTimeout(timeout);
-            reject(new Error('No service worker found. Run "npm run build && npm start" first.'));
-        }
+            reject(error);
+        });
     });
 }
 
@@ -109,10 +81,10 @@ export default function TestPushNotification() {
                 }
             }
 
-            // Step 2: Get or register service worker
-            console.log('Getting service worker registration...');
-            setMessage('⏳ Registering service worker...');
-            const registration = await getServiceWorkerRegistration();
+            // Step 2: Wait for service worker (registered globally in layout)
+            console.log('Waiting for service worker...');
+            setMessage('⏳ Waiting for service worker...');
+            const registration = await waitForServiceWorker();
             setSwStatus('ready');
             console.log('Service worker ready:', registration.scope);
 
