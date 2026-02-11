@@ -171,7 +171,7 @@ export default function RequestsListPage() {
             case 'admin_produksi':
                 return 'Menampilkan request untuk: Molding, Plating, Painting 1, Painting 2';
             case 'admin_indirect':
-                return 'Menampilkan request untuk: PP, QC, QA, PPIC, Logistics';
+                return 'Menampilkan request untuk: Assembly, PP, QC, QA, PPIC, Logistics';
             case 'supervisor':
             case 'admin_dept':
                 return `Menampilkan request untuk departemen: ${userProfile.department?.name || userProfile.department?.code || '-'}`;

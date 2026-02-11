@@ -199,7 +199,7 @@ export default function DashboardPage() {
             case 'admin_produksi':
                 return 'Dashboard Admin Produksi - Molding, Plating, Painting';
             case 'admin_indirect':
-                return 'Dashboard Admin Indirect - Assembly,PP, QC, QA, PPIC, Logistics';
+                return 'Dashboard Admin Indirect - Assembly, PP, QC, QA, PPIC, Logistics';
             case 'supervisor':
                 return `Dashboard Supervisor - ${userProfile.department?.name || 'Departemen'}`;
             case 'admin_dept':

@@ -3,8 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build --webpack",
+    "dev": "next dev --webpack",
+    "build": "next build --webpack && npm run postbuild",
+    "postbuild": "node scripts/inject-sw-handlers.js",
     "start": "next start",
     "lint": "eslint"
   },

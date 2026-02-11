@@ -17,7 +17,7 @@ interface RequestItemRow {
 // Map role to allowed department codes
 const ROLE_DEPARTMENTS: Record<string, readonly string[]> = {
     admin_produksi: PRODUCTION_DEPARTMENTS, // MOLDING, PLATING, PAINTING1, PAINTING2
-    admin_indirect: INDIRECT_DEPARTMENTS,   // PP, QC, QA, PPIC, LOGISTICS
+    admin_indirect: INDIRECT_DEPARTMENTS,   // ASSEMBLY, PP, QC, QA, PPIC, LOGISTICS
     admin_dept: [],                          // Will use their own department
     supervisor: [],                          // Not typically creating requests
     hrga: [],                                // All departments
@@ -454,7 +454,7 @@ export default function NewRequestPage() {
             case 'admin_produksi':
                 return 'Anda dapat membuat request untuk: Molding, Plating, Painting 1, Painting 2';
             case 'admin_indirect':
-                return 'Anda dapat membuat request untuk: PP, QC, QA, PPIC, Logistics';
+                return 'Anda dapat membuat request untuk: Assembly, PP, QC, QA, PPIC, Logistics';
             case 'admin_dept':
                 return 'Anda dapat membuat request untuk departemen Anda sendiri';
             case 'hrga':
