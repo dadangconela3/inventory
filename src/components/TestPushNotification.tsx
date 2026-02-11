@@ -53,37 +53,42 @@ export default function TestPushNotification() {
     const [subscriptionInfo, setSubscriptionInfo] = useState<SubscriptionInfo | null>(null);
     const [currentUserId, setCurrentUserId] = useState<string>('');
 
+    const [loadingInfo, setLoadingInfo] = useState(false);
+
     const fetchSubscriptionInfo = async (endpoint: string) => {
+        setLoadingInfo(true);
         try {
-            const { data, error } = await supabase
+            // First fetch the subscription to get user_id
+            const { data: subData, error: subError } = await supabase
                 .from('push_subscriptions')
-                .select(`
-                    user_id,
-                    endpoint,
-                    created_at,
-                    profiles:user_id (
-                        email,
-                        full_name
-                    )
-                `)
+                .select('user_id, endpoint, created_at')
                 .eq('endpoint', endpoint)
                 .single();
 
-            if (error) {
-                console.error('Error fetching subscription info:', error);
+            if (subError || !subData) {
+                console.warn('Subscription found in browser but not in DB:', subError);
                 return null;
             }
 
+            // Then fetch profile info separately (safer than join)
+            const { data: profileData } = await supabase
+                .from('profiles')
+                .select('email, full_name')
+                .eq('id', subData.user_id)
+                .single();
+
             return {
-                user_id: data.user_id,
-                endpoint: data.endpoint,
-                created_at: data.created_at,
-                user_email: (data.profiles as any)?.email,
-                user_name: (data.profiles as any)?.full_name,
+                user_id: subData.user_id,
+                endpoint: subData.endpoint,
+                created_at: subData.created_at,
+                user_email: profileData?.email,
+                user_name: profileData?.full_name,
             };
         } catch (error) {
             console.error('Error in fetchSubscriptionInfo:', error);
             return null;
+        } finally {
+            setLoadingInfo(false);
         }
     };
 
@@ -271,40 +276,55 @@ export default function TestPushNotification() {
             </p>
 
             {/* Subscription Status Card */}
-            {isSubscribed && subscriptionInfo && (
-                <div className={`mb-4 rounded-lg border p-3 ${
-                    userIdMatch 
-                        ? 'border-success/30 bg-success/5' 
-                        : 'border-warning/30 bg-warning/5'
-                }`}>
-                    <div className="mb-2 flex items-center gap-2">
-                        <span className="text-sm font-medium text-slate-700 dark:text-navy-100">
-                            {userIdMatch ? '✅ Subscription Active' : '⚠️ Subscription Mismatch'}
-                        </span>
+            {isSubscribed && (
+                loadingInfo ? (
+                    <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-500 animate-pulse dark:border-navy-600 dark:bg-navy-600">
+                        Please wait, fetching subscription info...
                     </div>
-                    <div className="space-y-1 text-xs text-slate-600 dark:text-navy-300">
-                        <div>
-                            <strong>Registered User:</strong> {subscriptionInfo.user_name || 'Unknown'} ({subscriptionInfo.user_email})
+                ) : subscriptionInfo ? (
+                    <div className={`mb-4 rounded-lg border p-3 ${
+                        userIdMatch 
+                            ? 'border-success/30 bg-success/5' 
+                            : 'border-warning/30 bg-warning/5'
+                    }`}>
+                        <div className="mb-2 flex items-center gap-2">
+                            <span className="text-sm font-medium text-slate-700 dark:text-navy-100">
+                                {userIdMatch ? '✅ Subscription Active' : '⚠️ Subscription Mismatch'}
+                            </span>
                         </div>
-                        <div>
-                            <strong>User ID:</strong> 
-                            <code className="ml-1 rounded bg-slate-100 px-1 dark:bg-navy-600">
-                                {subscriptionInfo.user_id.substring(0, 8)}...
-                            </code>
-                        </div>
-                        <div>
-                            <strong>Current User:</strong> 
-                            <code className="ml-1 rounded bg-slate-100 px-1 dark:bg-navy-600">
-                                {currentUserId.substring(0, 8)}...
-                            </code>
-                        </div>
-                        {!userIdMatch && (
-                            <div className="mt-2 rounded bg-warning/10 p-2 text-warning">
-                                ⚠️ Device subscribed to different user. Click subscribe to update.
+                        <div className="space-y-1 text-xs text-slate-600 dark:text-navy-300">
+                            <div>
+                                <strong>Registered User:</strong> {subscriptionInfo.user_name || 'Unknown'} ({subscriptionInfo.user_email})
                             </div>
-                        )}
+                            <div>
+                                <strong>User ID:</strong> 
+                                <code className="ml-1 rounded bg-slate-100 px-1 dark:bg-navy-600">
+                                    {subscriptionInfo.user_id.substring(0, 8)}...
+                                </code>
+                            </div>
+                            <div>
+                                <strong>Current User:</strong> 
+                                <code className="ml-1 rounded bg-slate-100 px-1 dark:bg-navy-600">
+                                    {currentUserId.substring(0, 8)}...
+                                </code>
+                            </div>
+                            {!userIdMatch && (
+                                <div className="mt-2 rounded bg-warning/10 p-2 text-warning">
+                                    ⚠️ Device subscribed to different user. Click subscribe to update.
+                                </div>
+                            )}
+                        </div>
                     </div>
-                </div>
+                ) : (
+                    <div className="mb-4 rounded-lg border border-warning/30 bg-warning/5 p-3">
+                         <div className="text-sm font-medium text-warning dark:text-warning-light">
+                            ⚠️ Subscription found in browser but not in database.
+                         </div>
+                         <div className="mt-1 text-xs text-slate-600 dark:text-navy-300">
+                            Please click &quot;Re-subscribe&quot; below to sync with server.
+                         </div>
+                    </div>
+                )
             )}
 
             {/* Subscribe Button - Always visible */}
