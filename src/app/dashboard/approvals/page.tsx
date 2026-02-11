@@ -133,6 +133,15 @@ export default function ApprovalsPage() {
                 link: `/dashboard/requests/${request.id}`,
             });
 
+            // Send push notification to requester
+            const { sendPushNotification } = await import('@/lib/notifications');
+            await sendPushNotification({
+                title: '✅ Request Disetujui',
+                body: `Request ${request.doc_number} telah disetujui oleh Supervisor`,
+                link: `/dashboard/requests/${request.id}`,
+                userId: request.requester_id,
+            });
+
             // Notify all HRGA users
             const { data: hrgaUsers } = await supabase
                 .from('profiles')
@@ -146,6 +155,14 @@ export default function ApprovalsPage() {
                     link: '/dashboard/batches',
                 }));
                 await supabase.from('notifications').insert(hrgaNotifications);
+
+                // Send push notification to HRGA
+                await sendPushNotification({
+                    title: '📋 Request Siap Dijadwalkan',
+                    body: `Request ${request.doc_number} siap dijadwalkan`,
+                    link: '/dashboard/batches',
+                    userId: 'hrga-team',
+                });
             }
 
             // Remove from list

@@ -217,6 +217,15 @@ export default function RequestDetailPage({ params }: { params: Promise<{ id: st
                 link: `/dashboard/requests/${request.id}`,
             });
 
+            // Send push notification to requester
+            const { sendPushNotification } = await import('@/lib/notifications');
+            await sendPushNotification({
+                title: '📦 Barang Siap Diambil',
+                body: `Barang untuk request ${request.doc_number} telah diserahkan`,
+                link: `/dashboard/requests/${request.id}`,
+                userId: request.requester_id,
+            });
+
             // Refresh request data
             setRequest(prev => prev ? { ...prev, status: 'completed' as RequestStatus } : null);
             setShowHandoverModal(false);

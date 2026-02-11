@@ -412,7 +412,7 @@ export default function NewRequestPage() {
                 if (departmentData) {
                     const { data: supervisors } = await supabase
                         .from('profiles')
-                        .select('id')
+                        .select('id, full_name')
                         .eq('role', 'supervisor')
                         .eq('department_id', departmentData.id);
 
@@ -423,6 +423,15 @@ export default function NewRequestPage() {
                             link: '/dashboard/approvals',
                         }));
                         await supabase.from('notifications').insert(notifications);
+
+                        // Send push notification to supervisors
+                        const { sendPushNotification } = await import('@/lib/notifications');
+                        await sendPushNotification({
+                            title: '📋 Request Baru',
+                            body: `Request baru ${docNumber} menunggu approval Anda`,
+                            link: '/dashboard/approvals',
+                            userId: supervisors[0].id,
+                        });
                     }
                 }
             }
