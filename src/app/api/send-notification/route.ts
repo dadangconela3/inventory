@@ -40,14 +40,13 @@ export async function POST(request: NextRequest) {
         console.log('Supabase URL:', supabaseUrl);
         const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
-        // Fetch user's push subscriptions
-        console.log('Fetching subscriptions for user:', userId);
+        // Fetch ALL push subscriptions (broadcast to all devices)
+        console.log('Fetching all subscriptions (broadcast mode)');
         let subscriptions;
         try {
             const result = await supabaseAdmin
                 .from('push_subscriptions')
-                .select('*')
-                .eq('user_id', userId);
+                .select('*');
             
             if (result.error) {
                 console.error('Supabase query error:', result.error);
@@ -72,7 +71,7 @@ export async function POST(request: NextRequest) {
                 success: true,
                 sent: 0,
                 total: 0,
-                message: 'No subscriptions found for user',
+                message: 'No subscriptions found',
             });
         }
 
