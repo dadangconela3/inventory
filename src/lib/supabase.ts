@@ -21,8 +21,11 @@ const safeKey = supabaseAnonKey || 'placeholder_key';
 
 export const supabase: SupabaseClient = createClient(safeUrl, safeKey, {
     auth: {
-        autoRefreshToken: !isDemoMode,
-        persistSession: !isDemoMode,
+        autoRefreshToken: true, // Always auto-refresh tokens before expiry
+        persistSession: true,   // Persist session in localStorage for persistent login
+        detectSessionInUrl: true, // Support OAuth flows
+        storage: typeof window !== 'undefined' ? window.localStorage : undefined,
+        storageKey: 'inventory-auth-token', // Custom storage key
     },
 });
 

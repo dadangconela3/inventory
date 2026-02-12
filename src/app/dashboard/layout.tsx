@@ -39,13 +39,16 @@ export default function DashboardLayout({
         }
 
         try {
-            const { data: { user }, error } = await supabase.auth.getUser();
+            // Use getSession() instead of getUser() - faster, reads from localStorage
+            const { data: { session }, error } = await supabase.auth.getSession();
 
-            if (error || !user) {
+            if (error || !session?.user) {
                 cachedProfile = null;
                 router.replace('/login');
                 return;
             }
+
+            const user = session.user;
 
             if (cachedProfile && cachedProfile.id === user.id) {
                 setProfile(cachedProfile);

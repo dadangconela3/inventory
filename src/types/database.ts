@@ -175,7 +175,7 @@ export interface IncomingStockItem {
 
 // Role-Department Mapping - Must match database department codes!
 export const PRODUCTION_DEPARTMENTS = ['MLD', 'PLA', 'PA', 'PB'] as const;
-export const INDIRECT_DEPARTMENTS = ['PP', 'QC', 'QA', 'PPIC'] as const;
+export const INDIRECT_DEPARTMENTS = ['Assembly', 'PP', 'QC', 'QA', 'PPIC'] as const;
 export const OTHER_DEPARTMENTS = ['SALES', 'IT', 'GA', 'FAC'] as const;
 
 export type ProductionDept = typeof PRODUCTION_DEPARTMENTS[number];
