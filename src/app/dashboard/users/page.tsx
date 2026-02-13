@@ -672,100 +672,103 @@ export default function UsersPage() {
 
             {/* Add/Edit Modal */}
             {showModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-                    <div className="mx-4 w-full max-w-lg rounded-lg bg-white p-6 shadow-xl dark:bg-navy-700">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+                    <div className="w-full max-w-4xl rounded-lg bg-white p-6 shadow-xl dark:bg-navy-700">
                         <h3 className="mb-4 text-lg font-semibold text-slate-700 dark:text-navy-100">
                             {editingUser ? 'Edit User' : 'Tambah User Baru'}
                         </h3>
 
-                        <form onSubmit={handleSubmit} className="space-y-4">
-                            {/* Email - only for new users */}
-                            {!editingUser && (
+                        <form onSubmit={handleSubmit} className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                            {/* Left Column: User Details */}
+                            <div className="space-y-4">
+                                {/* Email - only for new users */}
+                                {!editingUser && (
+                                    <div>
+                                        <label className="mb-1.5 block text-sm font-medium text-slate-600 dark:text-navy-100">
+                                            Email <span className="text-error">*</span>
+                                        </label>
+                                        <input
+                                            type="email"
+                                            value={formData.email}
+                                            onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                                            className="form-input w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 dark:border-navy-450"
+                                            required
+                                        />
+                                    </div>
+                                )}
+
+                                {/* Password - only for new users */}
+                                {!editingUser && (
+                                    <div>
+                                        <label className="mb-1.5 block text-sm font-medium text-slate-600 dark:text-navy-100">
+                                            Password <span className="text-error">*</span>
+                                        </label>
+                                        <input
+                                            type="password"
+                                            value={formData.password}
+                                            onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                                            className="form-input w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 dark:border-navy-450"
+                                            minLength={6}
+                                            required
+                                        />
+                                        <p className="mt-1 text-xs text-slate-400">Minimal 6 karakter</p>
+                                    </div>
+                                )}
+
+                                {/* Username */}
                                 <div>
                                     <label className="mb-1.5 block text-sm font-medium text-slate-600 dark:text-navy-100">
-                                        Email <span className="text-error">*</span>
+                                        Username
                                     </label>
                                     <input
-                                        type="email"
-                                        value={formData.email}
-                                        onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                                        type="text"
+                                        value={formData.username}
+                                        onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                                        className="form-input w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 dark:border-navy-450"
+                                        placeholder="Username untuk login"
+                                    />
+                                </div>
+
+                                {/* Full Name */}
+                                <div>
+                                    <label className="mb-1.5 block text-sm font-medium text-slate-600 dark:text-navy-100">
+                                        Nama Lengkap <span className="text-error">*</span>
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={formData.full_name}
+                                        onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
                                         className="form-input w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 dark:border-navy-450"
                                         required
                                     />
                                 </div>
-                            )}
 
-                            {/* Password - only for new users */}
-                            {!editingUser && (
+                                {/* Role */}
                                 <div>
                                     <label className="mb-1.5 block text-sm font-medium text-slate-600 dark:text-navy-100">
-                                        Password <span className="text-error">*</span>
+                                        Role <span className="text-error">*</span>
                                     </label>
-                                    <input
-                                        type="password"
-                                        value={formData.password}
-                                        onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                                        className="form-input w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 dark:border-navy-450"
-                                        minLength={6}
+                                    <select
+                                        value={formData.role}
+                                        onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+                                        className="form-select w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 dark:border-navy-450"
                                         required
-                                    />
-                                    <p className="mt-1 text-xs text-slate-400">Minimal 6 karakter</p>
+                                    >
+                                        {roles.map((role) => (
+                                            <option key={role.value} value={role.value}>
+                                                {role.label}
+                                            </option>
+                                        ))}
+                                    </select>
                                 </div>
-                            )}
-
-                            {/* Username */}
-                            <div>
-                                <label className="mb-1.5 block text-sm font-medium text-slate-600 dark:text-navy-100">
-                                    Username
-                                </label>
-                                <input
-                                    type="text"
-                                    value={formData.username}
-                                    onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                                    className="form-input w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 dark:border-navy-450"
-                                    placeholder="Username untuk login"
-                                />
                             </div>
 
-                            {/* Full Name */}
-                            <div>
-                                <label className="mb-1.5 block text-sm font-medium text-slate-600 dark:text-navy-100">
-                                    Nama Lengkap <span className="text-error">*</span>
-                                </label>
-                                <input
-                                    type="text"
-                                    value={formData.full_name}
-                                    onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
-                                    className="form-input w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 dark:border-navy-450"
-                                    required
-                                />
-                            </div>
-
-                            {/* Role */}
-                            <div>
-                                <label className="mb-1.5 block text-sm font-medium text-slate-600 dark:text-navy-100">
-                                    Role <span className="text-error">*</span>
-                                </label>
-                                <select
-                                    value={formData.role}
-                                    onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-                                    className="form-select w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 dark:border-navy-450"
-                                    required
-                                >
-                                    {roles.map((role) => (
-                                        <option key={role.value} value={role.value}>
-                                            {role.label}
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-
-                            {/* Departments - Multi-select with Primary */}
-                            <div>
+                            {/* Right Column: Departments - Multi-select with Primary */}
+                            <div className="flex flex-col">
                                 <label className="mb-1.5 block text-sm font-medium text-slate-600 dark:text-navy-100">
                                     Departemen
                                 </label>
-                                <div className="max-h-64 overflow-y-auto rounded-lg border border-slate-300 bg-slate-50 p-3 dark:border-navy-450 dark:bg-navy-800">
+                                <div className="flex-1 overflow-y-auto rounded-lg border border-slate-300 bg-slate-50 p-3 dark:border-navy-450 dark:bg-navy-800" style={{ maxHeight: '400px' }}>
                                     {departments.length === 0 ? (
                                         <p className="text-sm text-slate-400">Tidak ada departemen</p>
                                     ) : (
@@ -842,7 +845,7 @@ export default function UsersPage() {
                             </div>
 
                             {/* Buttons */}
-                            <div className="flex justify-end gap-3 pt-4">
+                            <div className="col-span-1 flex justify-end gap-3 pt-4 md:col-span-2">
                                 <button
                                     type="button"
                                     onClick={handleCloseModal}
