@@ -36,7 +36,15 @@ export default function RequestsListPage() {
 
                 const { data: profile } = await supabase
                     .from('profiles')
-                    .select('*, department:departments(code, name)')
+                    .select(`
+                        *,
+                        department:departments(code, name),
+                        user_departments(
+                            id,
+                            is_primary,
+                            department:departments(id, code, name)
+                        )
+                    `)
                     .eq('id', user.id)
                     .single();
 
@@ -58,8 +66,12 @@ export default function RequestsListPage() {
                     allowedDeptCodes = [...INDIRECT_DEPARTMENTS];
                     console.log('Admin Indirect - allowed depts:', allowedDeptCodes);
                 } else if (role === 'supervisor') {
-                    // Supervisor sees only their department
-                    if (profile?.department?.code) {
+                    // Supervisor sees their departments (multi-department support)
+                    if (profile?.user_departments && profile.user_departments.length > 0) {
+                        // Use user_departments for multi-department supervisors
+                        allowedDeptCodes = profile.user_departments.map((ud: any) => ud.department.code);
+                    } else if (profile?.department?.code) {
+                        // Fallback to single department for backward compatibility
                         allowedDeptCodes = [profile.department.code];
                     }
                     console.log('Supervisor - allowed depts:', allowedDeptCodes);
@@ -173,6 +185,11 @@ export default function RequestsListPage() {
             case 'admin_indirect':
                 return 'Menampilkan request untuk: Assembly, PP, QC, QA, PPIC, Logistics';
             case 'supervisor':
+                if (userProfile.user_departments && userProfile.user_departments.length > 0) {
+                    const deptNames = userProfile.user_departments.map((ud: any) => ud.department.name).join(', ');
+                    return `Menampilkan request untuk departemen: ${deptNames}`;
+                }
+                return `Menampilkan request untuk departemen: ${userProfile.department?.name || userProfile.department?.code || '-'}`;
             case 'admin_dept':
                 return `Menampilkan request untuk departemen: ${userProfile.department?.name || userProfile.department?.code || '-'}`;
             case 'hrga':

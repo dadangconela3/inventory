@@ -4,15 +4,22 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Department, UserRole } from '@/types/database';
 
+interface UserDepartmentRelation {
+    id: string;
+    is_primary: boolean;
+    department: { id: string; name: string; code: string };
+}
+
 interface UserWithDept {
     id: string;
     email: string;
     username?: string | null;
     full_name: string | null;
     role: UserRole;
-    department_id: string | null;
+    department_id: string | null; // Deprecated
     created_at: string;
-    department?: { name: string; code: string };
+    department?: { name: string; code: string }; // Deprecated
+    user_departments?: UserDepartmentRelation[]; // NEW: Multiple departments
 }
 
 export default function UsersPage() {
@@ -56,7 +63,15 @@ export default function UsersPage() {
             const [usersRes, deptRes] = await Promise.all([
                 supabase
                     .from('profiles')
-                    .select('*, department:departments(name, code)')
+                    .select(`
+                        *,
+                        department:departments(name, code),
+                        user_departments(
+                            id,
+                            is_primary,
+                            department:departments(id, name, code)
+                        )
+                    `)
                     .order('created_at', { ascending: false }),
                 supabase.from('departments').select('*').order('name'),
             ]);
@@ -523,7 +538,25 @@ export default function UsersPage() {
                                         {getRoleBadge(user.role)}
                                     </td>
                                     <td className="px-4 py-3 text-sm text-slate-600 dark:text-navy-200">
-                                        {user.department?.name || '-'}
+                                        {user.user_departments && user.user_departments.length > 0 ? (
+                                            <div className="flex flex-wrap gap-1">
+                                                {user.user_departments.map((ud) => (
+                                                    <span
+                                                        key={ud.id}
+                                                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                                                            ud.is_primary
+                                                                ? 'bg-primary/20 text-primary dark:bg-accent/20 dark:text-accent'
+                                                                : 'bg-slate-200 text-slate-700 dark:bg-navy-600 dark:text-navy-100'
+                                                        }`}
+                                                    >
+                                                        {ud.department.code}
+                                                        {ud.is_primary && ' ★'}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            user.department?.name || '-'
+                                        )}
                                     </td>
                                     <td className="px-4 py-3 text-center">
                                         <div className="flex items-center justify-center gap-2">

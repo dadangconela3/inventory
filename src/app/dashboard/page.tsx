@@ -36,7 +36,15 @@ export default function DashboardPage() {
 
                 const { data: profile } = await supabase
                     .from('profiles')
-                    .select('*, department:departments(code, name)')
+                    .select(`
+                        *,
+                        department:departments(code, name),
+                        user_departments(
+                            id,
+                            is_primary,
+                            department:departments(id, code, name)
+                        )
+                    `)
                     .eq('id', user.id)
                     .single();
 
@@ -51,13 +59,13 @@ export default function DashboardPage() {
                 } else if (role === 'admin_indirect') {
                     allowedDeptCodes = [...INDIRECT_DEPARTMENTS];
                 } else if (role === 'supervisor' || role === 'admin_dept') {
-                    if (profile?.department?.code) {
+                    // Supervisor sees their departments (multi-department support)
+                    if (profile?.user_departments && profile.user_departments.length > 0) {
+                        // Use user_departments for multi-department supervisors
+                        allowedDeptCodes = profile.user_departments.map((ud: any) => ud.department.code);
+                    } else if (profile?.department?.code) {
+                        // Fallback to single department for backward compatibility
                         allowedDeptCodes = [profile.department.code];
-
-                        // Special case: QC supervisor can see QC, QA, and PP
-                        if (profile.department.code === 'QC') {
-                            allowedDeptCodes = ['QC', 'QA', 'PP'];
-                        }
                     }
                 }
                 // HRGA sees all - no filter
@@ -201,6 +209,10 @@ export default function DashboardPage() {
             case 'admin_indirect':
                 return 'Dashboard Admin Indirect - Assembly, PP, QC, QA, PPIC, Logistics';
             case 'supervisor':
+                if (userProfile.user_departments && userProfile.user_departments.length > 0) {
+                    const deptNames = userProfile.user_departments.map((ud: any) => ud.department.code).join(', ');
+                    return `Dashboard Supervisor - ${deptNames}`;
+                }
                 return `Dashboard Supervisor - ${userProfile.department?.name || 'Departemen'}`;
             case 'admin_dept':
                 return `Dashboard Admin - ${userProfile.department?.name || 'Departemen'}`;

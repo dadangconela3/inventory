@@ -31,6 +31,16 @@ export interface Department {
     created_at: string;
 }
 
+// User-Department Junction (for multi-department support)
+export interface UserDepartment {
+    id: string;
+    user_id: string;
+    department_id: string;
+    is_primary: boolean;
+    department?: Department;
+    created_at: string;
+}
+
 // User Profile (linked to Supabase Auth)
 export interface Profile {
     id: string;
@@ -38,8 +48,10 @@ export interface Profile {
     username?: string | null;
     full_name: string | null;
     role: UserRole;
-    department_id: string | null;
-    department?: Department;
+    department_id: string | null; // Deprecated, kept for backward compatibility
+    department?: Department; // Deprecated, use departments instead
+    departments?: Department[]; // NEW: Array of departments for multi-department support
+    user_departments?: UserDepartment[]; // NEW: Full user-department relations
     created_at: string;
 }
 
