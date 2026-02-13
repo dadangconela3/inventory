@@ -247,9 +247,9 @@ export default function UsersPage() {
                     }
 
                     // Insert user_departments for multi-department support
-                    if (selectedDepartments.length > 0) {
+                    if (selectedDepartments.length > 0 && authData.user) {
                         const userDepartments = selectedDepartments.map(deptId => ({
-                            user_id: authData.user.id,
+                            user_id: authData.user!.id,
                             department_id: deptId,
                             is_primary: deptId === primaryDepartment,
                         }));
