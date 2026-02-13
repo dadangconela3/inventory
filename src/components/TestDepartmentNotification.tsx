@@ -4,6 +4,23 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { PRODUCTION_DEPARTMENTS, INDIRECT_DEPARTMENTS } from '@/types/database';
 
+interface Department {
+    code: string;
+    name: string;
+}
+
+interface UserDepartment {
+    id: string;
+    department?: Department | Department[]; // Supabase can return array for FK
+}
+
+interface SupervisorQueryResult {
+    id: string;
+    full_name: string;
+    department?: Department | Department[]; // Supabase can return array for FK
+    user_departments?: UserDepartment[];
+}
+
 interface Supervisor {
     id: string;
     full_name: string;
@@ -37,25 +54,52 @@ export default function TestDepartmentNotification() {
 
             setUserRole(profile?.role || '');
 
-            // Fetch all supervisors with their departments
+            // Fetch all supervisors with their departments (including multi-department)
             const { data: supervisorData } = await supabase
                 .from('profiles')
                 .select(`
                     id,
                     full_name,
-                    department:departments!department_id(code, name)
+                    department:departments!department_id(code, name),
+                    user_departments(
+                        id,
+                        department:departments(code, name)
+                    )
                 `)
                 .eq('role', 'supervisor');
 
             if (supervisorData) {
-                const formatted = supervisorData
-                    .filter(s => s.department)
-                    .map(s => ({
-                        id: s.id,
-                        full_name: s.full_name,
-                        department_code: (s.department as any).code,
-                        department_name: (s.department as any).name,
-                    }));
+                const formatted: Supervisor[] = [];
+                
+                for (const supervisor of supervisorData) {
+                    // Check if user has multi-department assignments
+                    if (supervisor.user_departments && supervisor.user_departments.length > 0) {
+                        // Add entry for each department
+                        for (const ud of supervisor.user_departments) {
+                            const dept = Array.isArray(ud.department) ? ud.department[0] : ud.department;
+                            if (dept) {
+                                formatted.push({
+                                    id: supervisor.id,
+                                    full_name: supervisor.full_name,
+                                    department_code: dept.code,
+                                    department_name: dept.name,
+                                });
+                            }
+                        }
+                    } else if (supervisor.department) {
+                        // Fallback to single department for backward compatibility
+                        const dept = Array.isArray(supervisor.department) ? supervisor.department[0] : supervisor.department;
+                        if (dept) {
+                            formatted.push({
+                                id: supervisor.id,
+                                full_name: supervisor.full_name,
+                                department_code: dept.code,
+                                department_name: dept.name,
+                            });
+                        }
+                    }
+                }
+                
                 setSupervisors(formatted);
             }
         } catch (error) {
@@ -214,7 +258,7 @@ export default function TestDepartmentNotification() {
 
                 <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600 dark:bg-navy-600 dark:text-navy-200">
                     <strong>💡 Catatan:</strong> Supervisor harus sudah subscribe terlebih dahulu agar dapat menerima notifikasi.
-                    Jika notifikasi terkirim tapi tidak muncul, cek apakah supervisor sudah klik "🔔 Step 1: Allow & Subscribe" di dashboard mereka.
+                    Jika notifikasi terkirim tapi tidak muncul, cek apakah supervisor sudah klik &quot;🔔 Step 1: Allow &amp; Subscribe&quot; di dashboard mereka.
                 </div>
             </div>
         </div>
