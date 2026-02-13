@@ -34,6 +34,8 @@ export default function UsersPage() {
     const [resetPasswordUser, setResetPasswordUser] = useState<UserWithDept | null>(null);
     const [newPassword, setNewPassword] = useState('');
     const [selectedUsers, setSelectedUsers] = useState<Set<string>>(new Set());
+    const [selectedDepartments, setSelectedDepartments] = useState<string[]>([]); // NEW: for multi-department
+    const [primaryDepartment, setPrimaryDepartment] = useState<string>(''); // NEW: primary dept
 
     // Form state
     const [formData, setFormData] = useState({
@@ -42,7 +44,7 @@ export default function UsersPage() {
         username: '',
         full_name: '',
         role: 'admin_dept' as string,
-        department_id: '',
+        department_id: '', // Deprecated, kept for backward compatibility
     });
 
     const roles = [
@@ -96,6 +98,21 @@ export default function UsersPage() {
                 role: user.role,
                 department_id: user.department_id || '',
             });
+            
+            // Load user's departments for multi-department editing
+            if (user.user_departments && user.user_departments.length > 0) {
+                const deptIds = user.user_departments.map(ud => ud.department.id);
+                const primaryDept = user.user_departments.find(ud => ud.is_primary);
+                setSelectedDepartments(deptIds);
+                setPrimaryDepartment(primaryDept?.department.id || deptIds[0]);
+            } else if (user.department_id) {
+                // Fallback for single department
+                setSelectedDepartments([user.department_id]);
+                setPrimaryDepartment(user.department_id);
+            } else {
+                setSelectedDepartments([]);
+                setPrimaryDepartment('');
+            }
         } else {
             setEditingUser(null);
             setFormData({
@@ -106,6 +123,8 @@ export default function UsersPage() {
                 role: 'admin_dept',
                 department_id: '',
             });
+            setSelectedDepartments([]);
+            setPrimaryDepartment('');
         }
         setShowModal(true);
     };
@@ -121,6 +140,8 @@ export default function UsersPage() {
             role: 'admin_dept',
             department_id: '',
         });
+        setSelectedDepartments([]);
+        setPrimaryDepartment('');
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -128,13 +149,15 @@ export default function UsersPage() {
         setProcessing(true);
 
         try {
+            const userId = editingUser?.id;
+
             if (editingUser) {
                 // Update existing user profile
                 const updateData = {
                     username: formData.username || null,
                     full_name: formData.full_name,
                     role: formData.role,
-                    department_id: formData.department_id || null,
+                    department_id: selectedDepartments.length > 0 ? primaryDepartment : null, // Set primary as main dept
                 };
 
                 console.log('Updating user with data:', updateData);
@@ -148,6 +171,32 @@ export default function UsersPage() {
                     console.error('Update error:', error);
                     throw error;
                 }
+
+                // Update user_departments for multi-department support
+                if (selectedDepartments.length > 0) {
+                    // Delete existing department assignments
+                    await supabase
+                        .from('user_departments')
+                        .delete()
+                        .eq('user_id', editingUser.id);
+
+                    // Insert new department assignments
+                    const userDepartments = selectedDepartments.map(deptId => ({
+                        user_id: editingUser.id,
+                        department_id: deptId,
+                        is_primary: deptId === primaryDepartment,
+                    }));
+
+                    const { error: deptError } = await supabase
+                        .from('user_departments')
+                        .insert(userDepartments);
+
+                    if (deptError) {
+                        console.error('Department assignment error:', deptError);
+                        throw deptError;
+                    }
+                }
+
                 alert('User berhasil diupdate!');
             } else {
                 // Create new user via Supabase Auth
@@ -182,7 +231,7 @@ export default function UsersPage() {
                         username: formData.username || formData.email.split('@')[0],
                         full_name: formData.full_name,
                         role: formData.role,
-                        department_id: formData.department_id || null,
+                        department_id: selectedDepartments.length > 0 ? primaryDepartment : null,
                     };
 
                     console.log('Upserting profile with data:', profileData);
@@ -195,6 +244,24 @@ export default function UsersPage() {
                     if (profileError) {
                         console.error('Profile upsert error:', profileError);
                         alert(`Warning: User created but profile update failed: ${profileError.message}`);
+                    }
+
+                    // Insert user_departments for multi-department support
+                    if (selectedDepartments.length > 0) {
+                        const userDepartments = selectedDepartments.map(deptId => ({
+                            user_id: authData.user.id,
+                            department_id: deptId,
+                            is_primary: deptId === primaryDepartment,
+                        }));
+
+                        const { error: deptError } = await supabase
+                            .from('user_departments')
+                            .insert(userDepartments);
+
+                        if (deptError) {
+                            console.error('Department assignment error:', deptError);
+                            // Don't throw, just log - user is already created
+                        }
                     }
                 }
 
@@ -693,23 +760,85 @@ export default function UsersPage() {
                                 </select>
                             </div>
 
-                            {/* Department */}
+                            {/* Departments - Multi-select with Primary */}
                             <div>
                                 <label className="mb-1.5 block text-sm font-medium text-slate-600 dark:text-navy-100">
                                     Departemen
                                 </label>
-                                <select
-                                    value={formData.department_id}
-                                    onChange={(e) => setFormData({ ...formData, department_id: e.target.value })}
-                                    className="form-select w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 dark:border-navy-450"
-                                >
-                                    <option value="">Pilih Departemen</option>
-                                    {departments.map((dept) => (
-                                        <option key={dept.id} value={dept.id}>
-                                            {dept.name}
-                                        </option>
-                                    ))}
-                                </select>
+                                <div className="max-h-64 overflow-y-auto rounded-lg border border-slate-300 bg-slate-50 p-3 dark:border-navy-450 dark:bg-navy-800">
+                                    {departments.length === 0 ? (
+                                        <p className="text-sm text-slate-400">Tidak ada departemen</p>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            {departments.map((dept) => {
+                                                const isSelected = selectedDepartments.includes(dept.id);
+                                                const isPrimary = primaryDepartment === dept.id;
+                                                
+                                                return (
+                                                    <div key={dept.id} className="flex items-center gap-3 rounded-lg bg-white p-2 dark:bg-navy-700">
+                                                        {/* Checkbox for selection */}
+                                                        <input
+                                                            type="checkbox"
+                                                            id={`dept-${dept.id}`}
+                                                            checked={isSelected}
+                                                            onChange={(e) => {
+                                                                if (e.target.checked) {
+                                                                    const newSelected = [...selectedDepartments, dept.id];
+                                                                    setSelectedDepartments(newSelected);
+                                                                    // Set as primary if first selection
+                                                                    if (newSelected.length === 1) {
+                                                                        setPrimaryDepartment(dept.id);
+                                                                    }
+                                                                } else {
+                                                                    const newSelected = selectedDepartments.filter(id => id !== dept.id);
+                                                                    setSelectedDepartments(newSelected);
+                                                                    // Update primary if removing current primary
+                                                                    if (isPrimary && newSelected.length > 0) {
+                                                                        setPrimaryDepartment(newSelected[0]);
+                                                                    } else if (newSelected.length === 0) {
+                                                                        setPrimaryDepartment('');
+                                                                    }
+                                                                }
+                                                            }}
+                                                            className="form-checkbox h-4 w-4 rounded border-slate-400 text-primary focus:ring-primary dark:border-navy-400"
+                                                        />
+                                                        
+                                                        {/* Department name */}
+                                                        <label 
+                                                            htmlFor={`dept-${dept.id}`}
+                                                            className="flex-1 cursor-pointer text-sm font-medium text-slate-700 dark:text-navy-100"
+                                                        >
+                                                            {dept.code} - {dept.name}
+                                                        </label>
+                                                        
+                                                        {/* Radio for primary */}
+                                                        {isSelected && (
+                                                            <div className="flex items-center gap-1">
+                                                                <input
+                                                                    type="radio"
+                                                                    id={`primary-${dept.id}`}
+                                                                    name="primary_department"
+                                                                    checked={isPrimary}
+                                                                    onChange={() => setPrimaryDepartment(dept.id)}
+                                                                    className="form-radio h-4 w-4 text-warning focus:ring-warning"
+                                                                />
+                                                                <label 
+                                                                    htmlFor={`primary-${dept.id}`}
+                                                                    className="cursor-pointer text-xs text-slate-500 dark:text-navy-300"
+                                                                >
+                                                                    Primary
+                                                                </label>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                                <p className="mt-1 text-xs text-slate-400">
+                                    Pilih satu atau lebih departemen. Tandai salah satu sebagai primary.
+                                </p>
                             </div>
 
                             {/* Buttons */}
