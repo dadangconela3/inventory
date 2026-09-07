@@ -6,6 +6,8 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { RequestStatus, Profile } from '@/types/database';
 import SignaturePad from '@/components/ui/SignaturePad';
+import DeleteRequestModal from '@/components/requests/DeleteRequestModal';
+import { showColoredToast } from '@/lib/toast';
 
 interface RequestWithDetails {
     id: string;
@@ -22,8 +24,9 @@ interface RequestWithDetails {
     requester?: { full_name: string; email: string };
     department?: { name: string };
     items?: {
+        item_id?: string;
         quantity: number;
-        item: { name: string; sku: string; unit: string };
+        item: { id?: string; name: string; sku: string; unit: string; current_stock?: number };
     }[];
 }
 
@@ -41,6 +44,9 @@ export default function RequestDetailPage({ params }: { params: Promise<{ id: st
     const [showHandoverModal, setShowHandoverModal] = useState(false);
     const [handoverNote, setHandoverNote] = useState('');
     const [handoverQuantities, setHandoverQuantities] = useState<Record<number, number>>({});
+
+    // Delete modal state (HRGA only)
+    const [showDeleteModal, setShowDeleteModal] = useState(false);
     useEffect(() => {
         const fetchData = async () => {
             setLoading(true);
@@ -64,6 +70,7 @@ export default function RequestDetailPage({ params }: { params: Promise<{ id: st
             requester:profiles!requester_id(full_name, email),
             department:departments!dept_code(name),
             items:request_items(
+              id,
               quantity,
               item_id,
               item:items(id, name, sku, unit, current_stock)
@@ -178,61 +185,62 @@ export default function RequestDetailPage({ params }: { params: Promise<{ id: st
 
         setProcessing(true);
         try {
-            // Update stock for each item using item_id
-            for (let i = 0; i < (request.items?.length || 0); i++) {
-                const reqItem = request.items![i];
-                const quantityToDeduct = handoverQuantities[i] || reqItem.quantity;
+            const handoverItems = (request.items || []).map((reqItem, idx) => {
+                const quantityToDeduct = handoverQuantities[idx] !== undefined ? handoverQuantities[idx] : reqItem.quantity;
+                return {
+                    requestItemId: (reqItem as any).id,
+                    itemId: (reqItem as any).item_id || (reqItem as any).item?.id,
+                    actualQuantity: Number(quantityToDeduct)
+                };
+            });
 
-                // Get current stock from the item relation
-                const currentStock = (reqItem as any).item?.current_stock || 0;
-                const newStock = Math.max(0, currentStock - quantityToDeduct);
-
-                // Update stock using item_id
-                const { error: updateError } = await supabase
-                    .from('items')
-                    .update({ current_stock: newStock })
-                    .eq('id', (reqItem as any).item_id);
-
-                if (updateError) {
-                    console.error('Error updating stock:', updateError);
-                    throw updateError;
+            // Validate that quantities are valid
+            for (const it of handoverItems) {
+                if (!it.actualQuantity || it.actualQuantity <= 0) {
+                    showColoredToast('warning', 'Jumlah barang yang diserahkan minimal 1');
+                    setProcessing(false);
+                    return;
                 }
             }
 
-            // Update request status to completed
-            const { error: updateError } = await supabase
-                .from('requests')
-                .update({
-                    status: 'completed',
-                    updated_at: new Date().toISOString(),
+            const { data: { session } } = await supabase.auth.getSession();
+            const token = session?.access_token;
+
+            const response = await fetch('/api/requests/handover', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+                },
+                body: JSON.stringify({
+                    handovers: [
+                        {
+                            requestId: request.id,
+                            items: handoverItems
+                        }
+                    ]
                 })
-                .eq('id', request.id);
-
-            if (updateError) throw updateError;
-
-            // Notify requester
-            await supabase.from('notifications').insert({
-                user_id: request.requester_id,
-                message: `Barang untuk request ${request.doc_number} telah diserahkan`,
-                link: `/dashboard/requests/${request.id}`,
             });
 
-            // Send push notification to requester
-            const { sendPushNotification } = await import('@/lib/notifications');
-            await sendPushNotification({
-                title: '📦 Barang Siap Diambil',
-                body: `Barang untuk request ${request.doc_number} telah diserahkan`,
-                link: `/dashboard/requests/${request.id}`,
-                userId: request.requester_id,
-            });
+            const result = await response.json();
+            if (!response.ok) {
+                throw new Error(result.error || 'Gagal menyerahkan barang');
+            }
 
-            // Refresh request data
-            setRequest(prev => prev ? { ...prev, status: 'completed' as RequestStatus } : null);
+            // Refresh request data with updated quantities
+            setRequest(prev => prev ? {
+                ...prev,
+                status: 'completed' as RequestStatus,
+                items: prev.items?.map((it, idx) => ({
+                    ...it,
+                    quantity: handoverQuantities[idx] !== undefined ? Number(handoverQuantities[idx]) : it.quantity
+                }))
+            } : null);
             setShowHandoverModal(false);
-            alert('Barang berhasil diserahkan! Stok telah diperbarui.');
-        } catch (error) {
+            showColoredToast('success', 'Barang berhasil diserahkan dan kuantitas request diperbarui!');
+        } catch (error: any) {
             console.error('Error during handover:', error);
-            alert('Gagal menyerahkan barang. Silakan coba lagi.');
+            showColoredToast('error', error?.message || 'Gagal menyerahkan barang.');
         } finally {
             setProcessing(false);
         }
@@ -288,6 +296,20 @@ export default function RequestDetailPage({ params }: { params: Promise<{ id: st
                         })}
                     </p>
                 </div>
+
+                {/* HRGA Delete Action */}
+                {userProfile?.role === 'hrga' && (
+                    <button
+                        onClick={() => setShowDeleteModal(true)}
+                        className="btn border border-error/50 text-error hover:bg-error hover:text-white transition-colors flex items-center gap-1.5 self-start sm:self-auto"
+                        title="Hapus Request (HRGA)"
+                    >
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                        Hapus Request
+                    </button>
+                )}
             </div>
 
             <div className="grid gap-6 lg:grid-cols-3">
@@ -527,32 +549,39 @@ export default function RequestDetailPage({ params }: { params: Promise<{ id: st
                                 Barang yang Diserahkan
                             </h4>
                             <div className="space-y-2">
-                                {request?.items?.map((item, index) => (
-                                    <div key={index} className="flex items-center justify-between rounded-lg border border-slate-200 p-3 dark:border-navy-500">
-                                        <div>
-                                            <p className="font-medium text-slate-700 dark:text-navy-100">
-                                                {item.item.name}
-                                            </p>
-                                            <p className="text-xs text-slate-500">{item.item.sku}</p>
+                                {request?.items?.map((item, index) => {
+                                    const currentStock = item.item?.current_stock ?? 0;
+                                    const qty = handoverQuantities[index] !== undefined ? handoverQuantities[index] : item.quantity;
+                                    const isShort = currentStock < qty;
+                                    return (
+                                        <div key={index} className={`flex items-center justify-between rounded-lg border p-3 ${isShort ? 'border-error/40 bg-error/5 dark:border-error/30' : 'border-slate-200 dark:border-navy-500'}`}>
+                                            <div>
+                                                <p className="font-medium text-slate-700 dark:text-navy-100">
+                                                    {item.item.name}
+                                                </p>
+                                                <p className="text-xs text-slate-500">
+                                                    {item.item.sku} • <span className={isShort ? 'text-error font-semibold' : 'text-slate-500'}>Stok Gudang: {currentStock} {item.item.unit}{isShort ? ' (Kurang!)' : ''}</span>
+                                                </p>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <input
+                                                    type="number"
+                                                    min="0"
+                                                    max={item.quantity}
+                                                    value={qty}
+                                                    onChange={(e) => setHandoverQuantities({
+                                                        ...handoverQuantities,
+                                                        [index]: Math.min(item.quantity, parseInt(e.target.value) || 0)
+                                                    })}
+                                                    className={`w-20 rounded-lg border px-2 py-1 text-center text-sm ${isShort ? 'border-error text-error' : 'border-slate-300 dark:border-navy-450 dark:bg-navy-600'}`}
+                                                />
+                                                <span className="text-sm text-slate-500">
+                                                    / {item.quantity} {item.item.unit}
+                                                </span>
+                                            </div>
                                         </div>
-                                        <div className="flex items-center gap-2">
-                                            <input
-                                                type="number"
-                                                min="0"
-                                                max={item.quantity}
-                                                value={handoverQuantities[index] || item.quantity}
-                                                onChange={(e) => setHandoverQuantities({
-                                                    ...handoverQuantities,
-                                                    [index]: Math.min(item.quantity, parseInt(e.target.value) || 0)
-                                                })}
-                                                className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-center text-sm dark:border-navy-450 dark:bg-navy-600"
-                                            />
-                                            <span className="text-sm text-slate-500">
-                                                / {item.quantity} {item.item.unit}
-                                            </span>
-                                        </div>
-                                    </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         </div>
 
@@ -590,6 +619,17 @@ export default function RequestDetailPage({ params }: { params: Promise<{ id: st
                     </div>
                 </div>
             )}
+
+            {/* Delete Request Modal (HRGA) */}
+            <DeleteRequestModal
+                isOpen={showDeleteModal}
+                onClose={() => setShowDeleteModal(false)}
+                request={request}
+                onSuccess={(msg) => {
+                    alert(msg);
+                    router.push('/dashboard/requests');
+                }}
+            />
         </div>
     );
 }

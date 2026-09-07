@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { Department, Item, Profile, UserRole, PRODUCTION_DEPARTMENTS, INDIRECT_DEPARTMENTS } from '@/types/database';
 import { generateDocNumberPreview } from '@/lib/utils/doc-number';
 import CreatableSelect, { SelectOption } from '@/components/ui/CreatableSelect';
+import { showColoredToast } from '@/lib/toast';
 
 interface RequestItemRow {
     id: string;
@@ -250,11 +251,11 @@ export default function NewRequestPage() {
     // Save new item from modal
     const handleSaveNewItem = async () => {
         if (!newItemFormData.name.trim()) {
-            alert('Nama barang harus diisi');
+            showColoredToast('warning', 'Nama barang harus diisi');
             return;
         }
         if (!newItemFormData.sku.trim()) {
-            alert('SKU harus diisi');
+            showColoredToast('warning', 'SKU harus diisi');
             return;
         }
 
@@ -274,7 +275,7 @@ export default function NewRequestPage() {
 
             if (error) {
                 console.error('Supabase error:', error);
-                alert(`Gagal menambahkan barang: ${error.message}`);
+                showColoredToast('error', `Gagal menambahkan barang: ${error.message}`);
                 return;
             }
 
@@ -290,10 +291,11 @@ export default function NewRequestPage() {
             // Close modal and reset
             setShowNewItemModal(false);
             setNewItemFormData({ name: '', sku: '', unit: 'pcs', min_stock: 0 });
+            showColoredToast('success', 'Barang baru berhasil ditambahkan!');
 
         } catch (error) {
             console.error('Error creating new item:', error);
-            alert('Gagal menambahkan barang baru.');
+            showColoredToast('error', 'Gagal menambahkan barang baru.');
         } finally {
             setSavingNewItem(false);
         }
@@ -310,19 +312,53 @@ export default function NewRequestPage() {
         e.preventDefault();
 
         if (!selectedDept) {
-            alert('Pilih departemen terlebih dahulu');
+            showColoredToast('warning', 'Pilih departemen terlebih dahulu');
             return;
         }
 
         const validItems = requestItems.filter(item => item.item_id && item.quantity > 0);
         if (validItems.length === 0) {
-            alert('Tambahkan minimal satu barang dengan jumlah yang valid');
+            showColoredToast('warning', 'Tambahkan minimal satu barang dengan jumlah valid');
             return;
         }
 
         setSubmitting(true);
 
         try {
+            // Validate stock availability against latest DB stock
+            const requestedQtyByItem: Record<string, number> = {};
+            for (const it of validItems) {
+                requestedQtyByItem[it.item_id] = (requestedQtyByItem[it.item_id] || 0) + it.quantity;
+            }
+
+            const itemIds = Object.keys(requestedQtyByItem);
+            const { data: dbItems, error: stockFetchError } = await supabase
+                .from('items')
+                .select('id, name, unit, current_stock')
+                .in('id', itemIds);
+
+            if (stockFetchError) {
+                console.error('Error checking stock:', stockFetchError);
+            } else if (dbItems) {
+                const stockErrors: string[] = [];
+                for (const dbItem of dbItems) {
+                    const requestedQty = requestedQtyByItem[dbItem.id] || 0;
+                    if (dbItem.current_stock <= 0) {
+                        stockErrors.push(`"${dbItem.name}" - stok saat ini kosong (0 ${dbItem.unit || 'pcs'})`);
+                    } else if (requestedQty > dbItem.current_stock) {
+                        stockErrors.push(
+                            `"${dbItem.name}" - melebihi stok yang tersedia (Tersedia: ${dbItem.current_stock} ${dbItem.unit || 'pcs'}, Diminta: ${requestedQty} ${dbItem.unit || 'pcs'})`
+                        );
+                    }
+                }
+
+                if (stockErrors.length > 0) {
+                    alert(`Permintaan tidak dapat dikirim karena melebihi stok:\n- ${stockErrors.join('\n- ')}`);
+                    setSubmitting(false);
+                    return;
+                }
+            }
+
             // Group items by department for multi-split logic
             const itemsByDept = validItems.reduce((acc, item) => {
                 const deptCode = item.dept_code || selectedDept;
@@ -375,6 +411,11 @@ export default function NewRequestPage() {
 
                 const docNumber = generateDocNumberPreview(deptCode, new Date(requestDate), sequence);
 
+                // Determine if this role bypasses supervisor approval
+                const role = userProfile?.role;
+                const bypassSupervisor = role === 'admin_produksi' || role === 'admin_indirect';
+                const initialStatus = bypassSupervisor ? 'approved_spv' : 'pending';
+
                 // Create request
                 const { data: request, error: requestError } = await supabase
                     .from('requests')
@@ -382,7 +423,7 @@ export default function NewRequestPage() {
                         doc_number: docNumber,
                         requester_id: user.id,
                         dept_code: deptCode,
-                        status: 'pending',
+                        status: initialStatus,
                     })
                     .select()
                     .single();
@@ -402,54 +443,88 @@ export default function NewRequestPage() {
 
                 if (itemsError) throw itemsError;
 
-                // Notify supervisor of this department
-                const { data: departmentData } = await supabase
-                    .from('departments')
-                    .select('id')
-                    .eq('code', deptCode)
-                    .single();
+                const { sendPushNotification } = await import('@/lib/notifications');
 
-                if (departmentData) {
-                    const { data: supervisors } = await supabase
+                if (bypassSupervisor) {
+                    // Admin produksi / admin indirect: langsung notify HRGA tanpa approval supervisor
+                    const { data: hrgaUsers } = await supabase
                         .from('profiles')
                         .select('id, full_name')
-                        .eq('role', 'supervisor')
-                        .eq('department_id', departmentData.id);
+                        .eq('role', 'hrga');
 
-                    console.log(`[Notification] Found ${supervisors?.length || 0} supervisors for dept ${deptCode}`);
+                    console.log(`[Notification] Bypass supervisor — notifying ${hrgaUsers?.length || 0} HRGA users`);
 
-                    if (supervisors && supervisors.length > 0) {
-                        const notifications = supervisors.map(s => ({
-                            user_id: s.id,
-                            message: `Request baru ${docNumber} menunggu approval`,
-                            link: '/dashboard/approvals',
+                    if (hrgaUsers && hrgaUsers.length > 0) {
+                        const adminName = userProfile?.full_name || user.email || 'Admin';
+                        const hrgaNotifications = hrgaUsers.map(h => ({
+                            user_id: h.id,
+                            message: `Ada pesanan sarung tangan baru ${docNumber} dari ${adminName} — siap diserahkan`,
+                            link: '/dashboard/requests',
                         }));
-                        await supabase.from('notifications').insert(notifications);
+                        await supabase.from('notifications').insert(hrgaNotifications);
 
-                        // Send push notification to ALL supervisors
-                        const { sendPushNotification } = await import('@/lib/notifications');
-                        for (const supervisor of supervisors) {
-                            console.log(`[Notification] Sending push to supervisor: ${supervisor.full_name} (${supervisor.id})`);
+                        // Send push notification to each HRGA user
+                        for (const hrgaUser of hrgaUsers) {
+                            console.log(`[Notification] Sending push to HRGA: ${hrgaUser.full_name} (${hrgaUser.id})`);
                             await sendPushNotification({
-                                title: '📋 Request Baru',
-                                body: `Request baru ${docNumber} menunggu approval Anda`,
-                                link: '/dashboard/approvals',
-                                userId: supervisor.id,
+                                title: '🧤 Pesanan Sarung Tangan Baru',
+                                body: `Pesanan ${docNumber} dari ${adminName} siap untuk diserahkan`,
+                                link: '/dashboard/requests',
+                                userId: hrgaUser.id,
                             });
                         }
                     } else {
-                        console.warn(`[Notification] No supervisors found for dept ${deptCode}`);
+                        console.warn(`[Notification] No HRGA users found to notify`);
+                    }
+                } else {
+                    // Other roles (admin_dept, etc.): notify supervisor as usual
+                    const { data: departmentData } = await supabase
+                        .from('departments')
+                        .select('id')
+                        .eq('code', deptCode)
+                        .single();
+
+                    if (departmentData) {
+                        const { data: supervisors } = await supabase
+                            .from('profiles')
+                            .select('id, full_name')
+                            .eq('role', 'supervisor')
+                            .eq('department_id', departmentData.id);
+
+                        console.log(`[Notification] Found ${supervisors?.length || 0} supervisors for dept ${deptCode}`);
+
+                        if (supervisors && supervisors.length > 0) {
+                            const notifications = supervisors.map(s => ({
+                                user_id: s.id,
+                                message: `Request baru ${docNumber} menunggu approval`,
+                                link: '/dashboard/approvals',
+                            }));
+                            await supabase.from('notifications').insert(notifications);
+
+                            // Send push notification to ALL supervisors
+                            for (const supervisor of supervisors) {
+                                console.log(`[Notification] Sending push to supervisor: ${supervisor.full_name} (${supervisor.id})`);
+                                await sendPushNotification({
+                                    title: '📋 Request Baru',
+                                    body: `Request baru ${docNumber} menunggu approval Anda`,
+                                    link: '/dashboard/approvals',
+                                    userId: supervisor.id,
+                                });
+                            }
+                        } else {
+                            console.warn(`[Notification] No supervisors found for dept ${deptCode}`);
+                        }
                     }
                 }
             }
 
             // Success
-            alert('Request berhasil dibuat!');
+            await showColoredToast('success', 'Request berhasil dibuat!', { timer: 1500 });
             router.push('/dashboard/requests');
             router.refresh();
         } catch (error) {
             console.error('Error creating request:', error);
-            alert('Gagal membuat request. Silakan coba lagi.');
+            showColoredToast('error', 'Gagal membuat request. Silakan coba lagi.');
         } finally {
             setSubmitting(false);
         }
@@ -617,14 +692,39 @@ export default function NewRequestPage() {
 
                                         {/* Quantity */}
                                         <td className="px-3 py-3">
-                                            <input
-                                                type="number"
-                                                min="1"
-                                                value={row.quantity}
-                                                onChange={(e) => updateItemRow(row.id, 'quantity', parseInt(e.target.value) || 1)}
-                                                className="form-input w-24 rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm hover:border-slate-400 focus:border-primary dark:border-navy-450 dark:hover:border-navy-400 dark:focus:border-accent"
-                                                required
-                                            />
+                                            {(() => {
+                                                const selectedItem = items.find(i => i.id === row.item_id);
+                                                const isExceeding = selectedItem && row.quantity > selectedItem.current_stock;
+                                                const isOutOfStock = selectedItem && selectedItem.current_stock <= 0;
+                                                return (
+                                                    <div>
+                                                        <input
+                                                            type="number"
+                                                            min="1"
+                                                            max={selectedItem ? Math.max(1, selectedItem.current_stock) : undefined}
+                                                            value={row.quantity}
+                                                            onChange={(e) => updateItemRow(row.id, 'quantity', parseInt(e.target.value) || 1)}
+                                                            className={`form-input w-28 rounded-lg border bg-transparent px-3 py-2 text-sm focus:border-primary dark:bg-transparent ${
+                                                                isExceeding || isOutOfStock
+                                                                    ? 'border-error text-error focus:border-error ring-1 ring-error/30'
+                                                                    : 'border-slate-300 hover:border-slate-400 dark:border-navy-450 dark:hover:border-navy-400'
+                                                            }`}
+                                                            required
+                                                        />
+                                                        {selectedItem && (
+                                                            <div className="mt-1 text-xs">
+                                                                {isOutOfStock ? (
+                                                                    <span className="text-error font-medium">Stok habis (0 {selectedItem.unit})</span>
+                                                                ) : isExceeding ? (
+                                                                    <span className="text-error font-medium">Maks: {selectedItem.current_stock} {selectedItem.unit}</span>
+                                                                ) : (
+                                                                    <span className="text-slate-400 dark:text-navy-300">Stok: {selectedItem.current_stock} {selectedItem.unit}</span>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })()}
                                         </td>
 
                                         {/* Department Override */}
@@ -704,14 +804,39 @@ export default function NewRequestPage() {
                                         <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-navy-300">
                                             Jumlah <span className="text-error">*</span>
                                         </label>
-                                        <input
-                                            type="number"
-                                            min="1"
-                                            value={row.quantity}
-                                            onChange={(e) => updateItemRow(row.id, 'quantity', parseInt(e.target.value) || 1)}
-                                            className="form-input w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm dark:border-navy-450"
-                                            required
-                                        />
+                                        {(() => {
+                                            const selectedItem = items.find(i => i.id === row.item_id);
+                                            const isExceeding = selectedItem && row.quantity > selectedItem.current_stock;
+                                            const isOutOfStock = selectedItem && selectedItem.current_stock <= 0;
+                                            return (
+                                                <div>
+                                                    <input
+                                                        type="number"
+                                                        min="1"
+                                                        max={selectedItem ? Math.max(1, selectedItem.current_stock) : undefined}
+                                                        value={row.quantity}
+                                                        onChange={(e) => updateItemRow(row.id, 'quantity', parseInt(e.target.value) || 1)}
+                                                        className={`form-input w-full rounded-lg border bg-transparent px-3 py-2 text-sm ${
+                                                            isExceeding || isOutOfStock
+                                                                ? 'border-error text-error ring-1 ring-error/30'
+                                                                : 'border-slate-300 dark:border-navy-450'
+                                                        }`}
+                                                        required
+                                                    />
+                                                    {selectedItem && (
+                                                        <div className="mt-1 text-xs">
+                                                            {isOutOfStock ? (
+                                                                <span className="text-error font-medium">Stok habis (0 {selectedItem.unit})</span>
+                                                            ) : isExceeding ? (
+                                                                <span className="text-error font-medium">Maks: {selectedItem.current_stock} {selectedItem.unit}</span>
+                                                            ) : (
+                                                                <span className="text-slate-400 dark:text-navy-300">Stok: {selectedItem.current_stock} {selectedItem.unit}</span>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })()}
                                     </div>
                                     <div>
                                         <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-navy-300">

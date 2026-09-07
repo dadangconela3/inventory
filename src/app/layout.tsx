@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Poppins, Inter } from "next/font/google";
 import "./globals.css";
+import "sweetalert2/dist/sweetalert2.min.css";
 import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
 import SubscriptionUserUpdater from "@/components/SubscriptionUserUpdater";
 import AuthStateManager from "@/components/AuthStateManager";

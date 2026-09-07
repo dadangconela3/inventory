@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { Request, RequestStatus, Profile, UserRole, PRODUCTION_DEPARTMENTS, INDIRECT_DEPARTMENTS, RequestItem, Item } from '@/types/database';
+import DeleteRequestModal from '@/components/requests/DeleteRequestModal';
+import { showColoredToast } from '@/lib/toast';
 
 interface RequestWithRelations extends Omit<Request, 'requester' | 'department' | 'items'> {
     requester?: { full_name: string; email: string };
@@ -18,6 +20,9 @@ export default function RequestsListPage() {
     const [loading, setLoading] = useState(true);
     const [statusFilter, setStatusFilter] = useState<RequestStatus | 'all'>('all');
     const [userProfile, setUserProfile] = useState<Profile | null>(null);
+
+    // Delete request state (HRGA only)
+    const [requestToDelete, setRequestToDelete] = useState<RequestWithRelations | null>(null);
 
     // Bulk approval state
     const [selectedRequests, setSelectedRequests] = useState<Set<string>>(new Set());
@@ -338,6 +343,7 @@ export default function RequestsListPage() {
     const [selectedForHandover, setSelectedForHandover] = useState<Set<string>>(new Set());
     const [showBulkHandoverModal, setShowBulkHandoverModal] = useState(false);
     const [handoverDetails, setHandoverDetails] = useState<RequestWithRelations[]>([]);
+    const [bulkHandoverQuantities, setBulkHandoverQuantities] = useState<Record<string, number>>({});
     const [loadingHandoverDetails, setLoadingHandoverDetails] = useState(false);
     const [processingHandover, setProcessingHandover] = useState(false);
 
@@ -375,19 +381,64 @@ export default function RequestsListPage() {
                     *,
                     requester:profiles!requester_id(full_name, email),
                     department:departments!dept_code(name),
-                    items:request_items(quantity, item:items(id, name, sku, unit, current_stock))
+                    items:request_items(id, item_id, quantity, item:items(id, name, sku, unit, current_stock))
                 `)
                 .in('id', Array.from(selectedForHandover));
 
             if (error) throw error;
-            setHandoverDetails(data || []);
+            const details = data || [];
+            setHandoverDetails(details);
+
+            // Initialize bulk handover quantities with original requested quantities
+            const initialQuantities: Record<string, number> = {};
+            for (const req of details) {
+                for (let i = 0; i < (req.items || []).length; i++) {
+                    const reqItem = req.items![i];
+                    const itemKey = reqItem.id || `${req.id}_${i}`;
+                    initialQuantities[itemKey] = reqItem.quantity;
+                }
+            }
+            setBulkHandoverQuantities(initialQuantities);
         } catch (error) {
             console.error('Error fetching handover details:', error);
-            alert('Gagal memuat detail request');
+            showColoredToast('error', 'Gagal memuat detail request');
         } finally {
             setLoadingHandoverDetails(false);
         }
     };
+
+    // Real-time calculation of total allocated quantity per item across all selected requests
+    const allocationSummary = (() => {
+        const summary: Record<string, { id: string; name: string; sku?: string; unit: string; current_stock: number; totalAllocated: number }> = {};
+        for (const req of handoverDetails) {
+            for (let i = 0; i < (req.items || []).length; i++) {
+                const reqItem = req.items![i];
+                const itemId = reqItem.item?.id || reqItem.item_id;
+                if (!itemId) continue;
+                const itemKey = reqItem.id || `${req.id}_${i}`;
+                const qty = bulkHandoverQuantities[itemKey] !== undefined
+                    ? bulkHandoverQuantities[itemKey]
+                    : reqItem.quantity;
+
+                if (!summary[itemId]) {
+                    summary[itemId] = {
+                        id: itemId,
+                        name: reqItem.item?.name || 'Barang',
+                        sku: reqItem.item?.sku,
+                        unit: reqItem.item?.unit || 'pcs',
+                        current_stock: reqItem.item?.current_stock ?? 0,
+                        totalAllocated: 0,
+                    };
+                }
+                summary[itemId].totalAllocated += qty;
+            }
+        }
+        return summary;
+    })();
+
+    const hasOverAllocatedItem = Object.values(allocationSummary).some(
+        item => item.totalAllocated > item.current_stock
+    );
 
     // Handle bulk handover
     const handleBulkHandover = async () => {
@@ -395,38 +446,55 @@ export default function RequestsListPage() {
 
         setProcessingHandover(true);
         try {
-            // Update stock for each item in each request
-            for (const req of handoverDetails) {
-                for (const reqItem of (req.items || [])) {
-                    const currentStock = reqItem.item?.current_stock || 0;
-                    const newStock = Math.max(0, currentStock - reqItem.quantity);
+            // Build handovers payload
+            const handoversPayload = [];
 
-                    await supabase
-                        .from('items')
-                        .update({ current_stock: newStock })
-                        .eq('id', reqItem.item?.id);
+            for (const req of handoverDetails) {
+                const items = [];
+                for (let i = 0; i < (req.items || []).length; i++) {
+                    const reqItem = req.items![i];
+                    const itemId = reqItem.item?.id || reqItem.item_id;
+                    if (!itemId) continue;
+
+                    const itemKey = reqItem.id || `${req.id}_${i}`;
+                    const actualQty = bulkHandoverQuantities[itemKey] !== undefined
+                        ? bulkHandoverQuantities[itemKey]
+                        : reqItem.quantity;
+
+                    if (actualQty <= 0) {
+                        showColoredToast('warning', `Jumlah serah terima untuk "${reqItem.item?.name || 'barang'}" minimal 1`);
+                        setProcessingHandover(false);
+                        return;
+                    }
+
+                    items.push({
+                        requestItemId: reqItem.id,
+                        itemId,
+                        actualQuantity: Number(actualQty)
+                    });
                 }
+                handoversPayload.push({
+                    requestId: req.id,
+                    items
+                });
             }
 
-            // Update all selected requests to completed
-            const { error } = await supabase
-                .from('requests')
-                .update({
-                    status: 'completed',
-                    updated_at: new Date().toISOString()
-                })
-                .in('id', Array.from(selectedForHandover));
+            const { data: { session } } = await supabase.auth.getSession();
+            const token = session?.access_token;
 
-            if (error) throw error;
+            const response = await fetch('/api/requests/handover', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+                },
+                body: JSON.stringify({ handovers: handoversPayload })
+            });
 
-            // Notify all requesters
-            const requesterIds = new Set(handoverDetails.map(r => r.requester_id));
-            const notifications = Array.from(requesterIds).map(userId => ({
-                user_id: userId,
-                message: 'Barang untuk request Anda telah diserahkan',
-                link: '/dashboard/requests',
-            }));
-            await supabase.from('notifications').insert(notifications);
+            const result = await response.json();
+            if (!response.ok) {
+                throw new Error(result.error || 'Gagal menyerahkan barang');
+            }
 
             // Update local state
             setRequests(prev => prev.map(r =>
@@ -435,12 +503,13 @@ export default function RequestsListPage() {
                     : r
             ));
 
+            const totalReqCount = selectedForHandover.size;
             setSelectedForHandover(new Set());
             setShowBulkHandoverModal(false);
-            alert(`${selectedForHandover.size} request berhasil diserahkan! Stok telah diperbarui.`);
-        } catch (error) {
+            showColoredToast('success', `${totalReqCount} request berhasil diserahkan dan kuantitas disesuaikan!`);
+        } catch (error: any) {
             console.error('Error during bulk handover:', error);
-            alert('Gagal menyerahkan barang');
+            showColoredToast('error', error?.message || 'Gagal menyerahkan barang');
         } finally {
             setProcessingHandover(false);
         }
@@ -646,6 +715,17 @@ export default function RequestsListPage() {
                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                                                     </svg>
                                                 </Link>
+                                                {isHRGA && (
+                                                    <button
+                                                        onClick={() => setRequestToDelete(request)}
+                                                        className="rounded-lg p-2 text-error transition-colors hover:bg-error/10"
+                                                        title="Hapus Request (HRGA)"
+                                                    >
+                                                        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                                        </svg>
+                                                    </button>
+                                                )}
                                             </div>
                                         </td>
                                     </tr>
@@ -762,8 +842,66 @@ export default function RequestsListPage() {
                                 ) : (
                                     <div className="space-y-4">
                                         <div className="rounded-lg bg-warning/10 p-4 text-sm text-warning">
-                                            <strong>Perhatian:</strong> Stok barang akan dikurangi otomatis untuk semua request yang dipilih.
+                                            <strong>Perhatian:</strong> Anda dapat mengatur jumlah yang diserahkan per request. Jika stok tidak mencukupi, kurangi jumlah serah terima sesuai ketersediaan stok riil.
                                         </div>
+
+                                        {/* Real-time Allocation vs Warehouse Stock summary */}
+                                        {Object.keys(allocationSummary).length > 0 && (
+                                            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-navy-600 dark:bg-navy-800 space-y-2.5">
+                                                <div className="flex items-center justify-between">
+                                                    <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-navy-200">
+                                                        Ringkasan Alokasi vs Stok Gudang
+                                                    </h4>
+                                                    {hasOverAllocatedItem ? (
+                                                        <span className="badge bg-error/15 text-error text-[11px] font-semibold px-2.5 py-0.5 rounded-full">
+                                                            Stok Tidak Cukup!
+                                                        </span>
+                                                    ) : (
+                                                        <span className="badge bg-success/15 text-success text-[11px] font-semibold px-2.5 py-0.5 rounded-full">
+                                                            Stok Cukup ✓
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <div className="grid gap-2 sm:grid-cols-2">
+                                                    {Object.values(allocationSummary).map((alloc) => {
+                                                        const isOver = alloc.totalAllocated > alloc.current_stock;
+                                                        return (
+                                                            <div
+                                                                key={alloc.id}
+                                                                className={`flex items-center justify-between rounded-lg p-3 text-xs border ${
+                                                                    isOver
+                                                                        ? 'border-error/50 bg-error/10 text-error'
+                                                                        : 'border-success/40 bg-success/10 text-success'
+                                                                }`}
+                                                            >
+                                                                <div>
+                                                                    <span className="font-bold text-slate-800 dark:text-navy-100">{alloc.name}</span>
+                                                                    <div className="text-[11px] opacity-80">
+                                                                        Stok Tersedia: {alloc.current_stock} {alloc.unit}
+                                                                    </div>
+                                                                </div>
+                                                                <div className="text-right">
+                                                                    <div>
+                                                                        <span className={`text-base font-extrabold ${isOver ? 'text-error' : 'text-success'}`}>
+                                                                            {alloc.totalAllocated}
+                                                                        </span>
+                                                                        <span className="text-[11px] opacity-75"> / {alloc.current_stock} {alloc.unit}</span>
+                                                                    </div>
+                                                                    {isOver ? (
+                                                                        <div className="text-[10px] font-bold text-error">Kurangi {alloc.totalAllocated - alloc.current_stock} {alloc.unit}!</div>
+                                                                    ) : (
+                                                                        <div className="text-[10px] font-medium text-success">Sisa nanti: {alloc.current_stock - alloc.totalAllocated} {alloc.unit}</div>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                                <p className="text-[11px] text-slate-500 dark:text-navy-300 italic">
+                                                    * Jika yang diserahkan lebih sedikit dari permintaan, jumlah request akan otomatis disesuaikan dengan yang diserahkan.
+                                                </p>
+                                            </div>
+                                        )}
 
                                         {handoverDetails.map((req) => (
                                             <div key={req.id} className="rounded-lg border border-slate-200 p-4 dark:border-navy-600">
@@ -779,23 +917,58 @@ export default function RequestsListPage() {
                                                     Pemohon: {req.requester?.full_name || req.requester?.email}
                                                 </p>
                                                 <div className="rounded-lg bg-slate-50 p-3 dark:bg-navy-600">
-                                                    <p className="mb-2 text-xs font-medium uppercase text-slate-500 dark:text-navy-300">Daftar Barang:</p>
-                                                    <ul className="space-y-1">
-                                                        {(req.items || []).map((item, idx: number) => (
-                                                            <li key={idx} className="flex items-center justify-between text-sm">
-                                                                <div>
-                                                                    <span className="text-slate-700 dark:text-navy-100">
-                                                                        {item.item?.name}
-                                                                    </span>
-                                                                    <span className="ml-2 text-xs text-slate-400">
-                                                                        (Stok: {item.item?.current_stock})
-                                                                    </span>
-                                                                </div>
-                                                                <span className="font-medium text-slate-600 dark:text-navy-200">
-                                                                    {item.quantity} {item.item?.unit}
-                                                                </span>
-                                                            </li>
-                                                        ))}
+                                                    <p className="mb-2 text-xs font-medium uppercase text-slate-500 dark:text-navy-300">Daftar Barang & Jumlah Serah Terima:</p>
+                                                    <ul className="space-y-2">
+                                                        {(req.items || []).map((item, idx: number) => {
+                                                            const itemKey = item.id || `${req.id}_${idx}`;
+                                                            const qty = bulkHandoverQuantities[itemKey] !== undefined
+                                                                ? bulkHandoverQuantities[itemKey]
+                                                                : item.quantity;
+                                                            const currentStock = item.item?.current_stock ?? 0;
+                                                            const isReduced = qty < item.quantity;
+
+                                                            return (
+                                                                <li key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-sm border-b border-slate-100 pb-2.5 last:border-0 last:pb-0 dark:border-navy-700">
+                                                                    <div>
+                                                                        <span className="font-medium text-slate-700 dark:text-navy-100">
+                                                                            {item.item?.name}
+                                                                        </span>
+                                                                        <span className="ml-2 text-xs text-slate-400">
+                                                                            (Stok: {currentStock} {item.item?.unit || 'pcs'})
+                                                                        </span>
+                                                                        {isReduced && (
+                                                                            <span className="ml-2 text-xs text-primary font-semibold">
+                                                                                (Disesuaikan: {qty})
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                    <div className="flex items-center gap-2 self-end sm:self-auto">
+                                                                        <span className="text-xs text-slate-400">Diserahkan:</span>
+                                                                        <input
+                                                                            type="number"
+                                                                            min="1"
+                                                                            max={item.quantity}
+                                                                            value={qty}
+                                                                            onChange={(e) => {
+                                                                                const val = parseInt(e.target.value) || 0;
+                                                                                setBulkHandoverQuantities(prev => ({
+                                                                                    ...prev,
+                                                                                    [itemKey]: Math.min(item.quantity, Math.max(0, val))
+                                                                                }));
+                                                                            }}
+                                                                            className={`w-20 rounded-lg border px-2 py-1 text-center text-sm font-semibold transition-colors ${
+                                                                                isReduced
+                                                                                    ? 'border-primary text-primary bg-primary/5'
+                                                                                    : 'border-slate-300 dark:border-navy-450 dark:bg-navy-700'
+                                                                            }`}
+                                                                        />
+                                                                        <span className="text-xs text-slate-500 font-medium">
+                                                                            / {item.quantity} {item.item?.unit || 'pcs'}
+                                                                        </span>
+                                                                    </div>
+                                                                </li>
+                                                            );
+                                                        })}
                                                     </ul>
                                                 </div>
                                             </div>
@@ -814,16 +987,40 @@ export default function RequestsListPage() {
                                 </button>
                                 <button
                                     onClick={handleBulkHandover}
-                                    disabled={processingHandover || loadingHandoverDetails}
+                                    disabled={processingHandover || loadingHandoverDetails || hasOverAllocatedItem}
                                     className="btn bg-success text-white hover:bg-success-focus disabled:opacity-50"
                                 >
-                                    {processingHandover ? 'Memproses...' : `Serahkan ${selectedForHandover.size} Request`}
+                                    {processingHandover ? 'Memproses...' : hasOverAllocatedItem ? 'Alokasi Melebihi Stok' : `Serahkan ${selectedForHandover.size} Request`}
                                 </button>
                             </div>
                         </div>
                     </div>
                 )
             }
+
+            {/* Delete Request Modal (HRGA) */}
+            <DeleteRequestModal
+                isOpen={!!requestToDelete}
+                onClose={() => setRequestToDelete(null)}
+                request={requestToDelete}
+                onSuccess={(msg) => {
+                    alert(msg);
+                    if (requestToDelete) {
+                        setRequests(prev => prev.filter(r => r.id !== requestToDelete.id));
+                        setSelectedRequests(prev => {
+                            const next = new Set(prev);
+                            next.delete(requestToDelete.id);
+                            return next;
+                        });
+                        setSelectedForHandover(prev => {
+                            const next = new Set(prev);
+                            next.delete(requestToDelete.id);
+                            return next;
+                        });
+                    }
+                    setRequestToDelete(null);
+                }}
+            />
         </div >
     );
 }
