@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Item } from '@/types/database';
+import Swal from 'sweetalert2';
 
 export default function StockManagementPage() {
     const [items, setItems] = useState<Item[]>([]);
@@ -94,28 +95,112 @@ export default function StockManagementPage() {
 
             setShowModal(false);
             fetchItems();
+            await Swal.fire({
+                title: 'Berhasil!',
+                text: editingItem ? 'Barang berhasil diperbarui!' : 'Barang berhasil ditambahkan!',
+                icon: 'success',
+                confirmButtonColor: '#3085d6',
+            });
         } catch (error: any) {
             console.error('Error saving item:', error);
-            alert(error.message || 'Gagal menyimpan barang');
+            Swal.fire({
+                title: 'Gagal!',
+                text: error.message || 'Gagal menyimpan barang',
+                icon: 'error',
+                confirmButtonColor: '#d33',
+            });
         } finally {
             setSubmitting(false);
         }
     };
 
     const handleDelete = async (item: Item) => {
-        if (!confirm(`Hapus barang "${item.name}"?`)) return;
+        const confirmResult = await Swal.fire({
+            title: 'Are you sure?',
+            text: `You won't be able to revert this! Hapus barang "${item.name}"?`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#3085d6',
+            cancelButtonColor: '#d33',
+            confirmButtonText: 'Yes, delete it!',
+            cancelButtonText: 'Batal'
+        });
+
+        if (!confirmResult.isConfirmed) return;
 
         try {
-            const { error } = await supabase
-                .from('items')
-                .delete()
-                .eq('id', item.id);
+            const { data: { session } } = await supabase.auth.getSession();
+            const token = session?.access_token;
 
-            if (error) throw error;
+            const res = await fetch('/api/items/delete', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+                },
+                body: JSON.stringify({ itemIds: [item.id], cascade: false })
+            });
+
+            const data = await res.json();
+
+            // If item has transaction references, offer cascade deletion option
+            if (data.hasReferences) {
+                const cascadeResult = await Swal.fire({
+                    title: 'Barang Memiliki Riwayat!',
+                    text: `Barang "${item.name}" masih terkait dengan ${data.referenceCount} riwayat transaksi (permintaan/stok masuk). Apakah Anda ingin menghapus barang ini beserta seluruh riwayat terkait?`,
+                    icon: 'warning',
+                    showCancelButton: true,
+                    confirmButtonColor: '#d33',
+                    cancelButtonColor: '#3085d6',
+                    confirmButtonText: 'Ya, Hapus Semua!',
+                    cancelButtonText: 'Batal'
+                });
+
+                if (!cascadeResult.isConfirmed) return;
+
+                const cascadeRes = await fetch('/api/items/delete', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+                    },
+                    body: JSON.stringify({ itemIds: [item.id], cascade: true })
+                });
+
+                const cascadeData = await cascadeRes.json();
+                if (!cascadeRes.ok) {
+                    throw new Error(cascadeData.error || 'Gagal menghapus barang');
+                }
+
+                await Swal.fire({
+                    title: 'Deleted!',
+                    text: `Barang "${item.name}" beserta riwayatnya berhasil dihapus.`,
+                    icon: 'success',
+                    confirmButtonColor: '#3085d6',
+                });
+                fetchItems();
+                return;
+            }
+
+            if (!res.ok) {
+                throw new Error(data.error || 'Gagal menghapus barang');
+            }
+
+            await Swal.fire({
+                title: 'Deleted!',
+                text: `Barang "${item.name}" berhasil dihapus.`,
+                icon: 'success',
+                confirmButtonColor: '#3085d6',
+            });
             fetchItems();
-        } catch (error) {
+        } catch (error: any) {
             console.error('Error deleting item:', error);
-            alert('Gagal menghapus barang');
+            Swal.fire({
+                title: 'Gagal!',
+                text: error?.message || 'Gagal menghapus barang',
+                icon: 'error',
+                confirmButtonColor: '#d33',
+            });
         }
     };
 
@@ -147,23 +232,98 @@ export default function StockManagementPage() {
     const handleBatchDelete = async () => {
         if (selectedItems.size === 0) return;
 
-        if (!confirm(`Apakah Anda yakin ingin menghapus ${selectedItems.size} barang?`)) return;
+        const confirmResult = await Swal.fire({
+            title: 'Are you sure?',
+            text: `You won't be able to revert this! ${selectedItems.size} barang akan dihapus.`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#3085d6',
+            cancelButtonColor: '#d33',
+            confirmButtonText: 'Yes, delete it!',
+            cancelButtonText: 'Batal'
+        });
+
+        if (!confirmResult.isConfirmed) return;
 
         setSubmitting(true);
         try {
-            const { error } = await supabase
-                .from('items')
-                .delete()
-                .in('id', Array.from(selectedItems));
+            const { data: { session } } = await supabase.auth.getSession();
+            const token = session?.access_token;
+            const itemIds = Array.from(selectedItems);
 
-            if (error) throw error;
+            const res = await fetch('/api/items/delete', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+                },
+                body: JSON.stringify({ itemIds, cascade: false })
+            });
 
-            alert(`${selectedItems.size} barang berhasil dihapus!`);
+            const data = await res.json();
+
+            if (data.hasReferences) {
+                const cascadeResult = await Swal.fire({
+                    title: 'Ada Barang Memiliki Riwayat!',
+                    text: `Sebagian barang masih terkait dengan ${data.referenceCount} riwayat transaksi (permintaan/stok masuk). Tetap hapus semua barang ini beserta riwayatnya?`,
+                    icon: 'warning',
+                    showCancelButton: true,
+                    confirmButtonColor: '#d33',
+                    cancelButtonColor: '#3085d6',
+                    confirmButtonText: 'Ya, Hapus Semua!',
+                    cancelButtonText: 'Batal'
+                });
+
+                if (!cascadeResult.isConfirmed) {
+                    setSubmitting(false);
+                    return;
+                }
+
+                const cascadeRes = await fetch('/api/items/delete', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+                    },
+                    body: JSON.stringify({ itemIds, cascade: true })
+                });
+
+                const cascadeData = await cascadeRes.json();
+                if (!cascadeRes.ok) {
+                    throw new Error(cascadeData.error || 'Gagal menghapus barang');
+                }
+
+                await Swal.fire({
+                    title: 'Deleted!',
+                    text: `${itemIds.length} barang berhasil dihapus.`,
+                    icon: 'success',
+                    confirmButtonColor: '#3085d6',
+                });
+                setSelectedItems(new Set());
+                fetchItems();
+                return;
+            }
+
+            if (!res.ok) {
+                throw new Error(data.error || 'Gagal menghapus barang');
+            }
+
+            await Swal.fire({
+                title: 'Deleted!',
+                text: `${itemIds.length} barang berhasil dihapus.`,
+                icon: 'success',
+                confirmButtonColor: '#3085d6',
+            });
             setSelectedItems(new Set());
             fetchItems();
-        } catch (error) {
+        } catch (error: any) {
             console.error('Error batch deleting items:', error);
-            alert('Gagal menghapus barang');
+            Swal.fire({
+                title: 'Gagal!',
+                text: error?.message || 'Gagal menghapus barang',
+                icon: 'error',
+                confirmButtonColor: '#d33',
+            });
         } finally {
             setSubmitting(false);
         }

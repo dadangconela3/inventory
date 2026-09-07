@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Department, UserRole } from '@/types/database';
+import Swal from 'sweetalert2';
 
 interface UserDepartmentRelation {
     id: string;
@@ -197,7 +198,12 @@ export default function UsersPage() {
                     }
                 }
 
-                alert('User berhasil diupdate!');
+                await Swal.fire({
+                    title: 'Berhasil!',
+                    text: 'User berhasil diupdate!',
+                    icon: 'success',
+                    confirmButtonColor: '#3085d6',
+                });
             } else {
                 // Create new user via Supabase Auth
                 const { data: authData, error: authError } = await supabase.auth.signUp({
@@ -213,9 +219,19 @@ export default function UsersPage() {
 
                 if (authError) {
                     if (authError.message.includes('already registered')) {
-                        alert('Email sudah terdaftar');
+                        Swal.fire({
+                            title: 'Gagal!',
+                            text: 'Email sudah terdaftar.',
+                            icon: 'error',
+                            confirmButtonColor: '#d33',
+                        });
                     } else {
-                        alert(`Error: ${authError.message}`);
+                        Swal.fire({
+                            title: 'Error!',
+                            text: authError.message,
+                            icon: 'error',
+                            confirmButtonColor: '#d33',
+                        });
                     }
                     throw authError;
                 }
@@ -243,7 +259,12 @@ export default function UsersPage() {
 
                     if (profileError) {
                         console.error('Profile upsert error:', profileError);
-                        alert(`Warning: User created but profile update failed: ${profileError.message}`);
+                        Swal.fire({
+                            title: 'Peringatan',
+                            text: `User dibuat namun update profil gagal: ${profileError.message}`,
+                            icon: 'warning',
+                            confirmButtonColor: '#3085d6',
+                        });
                     }
 
                     // Insert user_departments for multi-department support
@@ -265,69 +286,150 @@ export default function UsersPage() {
                     }
                 }
 
-                alert('User berhasil dibuat!');
+                await Swal.fire({
+                    title: 'Berhasil!',
+                    text: 'User berhasil dibuat!',
+                    icon: 'success',
+                    confirmButtonColor: '#3085d6',
+                });
             }
 
             handleCloseModal();
             fetchData();
-        } catch (error) {
+        } catch (error: any) {
             console.error('Error saving user:', error);
+            if (!error?.message?.includes('already registered')) {
+                Swal.fire({
+                    title: 'Gagal!',
+                    text: error?.message || 'Gagal menyimpan user',
+                    icon: 'error',
+                    confirmButtonColor: '#d33',
+                });
+            }
         } finally {
             setProcessing(false);
         }
     };
 
     const handleDeleteUser = async (userId: string, userEmail: string) => {
-        if (!confirm(`Apakah Anda yakin ingin menghapus user ${userEmail}? User akan dihapus permanen dari sistem.`)) return;
+        const result = await Swal.fire({
+            title: 'Are you sure?',
+            text: `You won't be able to revert this! User ${userEmail} akan dihapus permanen dari sistem.`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#3085d6',
+            cancelButtonColor: '#d33',
+            confirmButtonText: 'Yes, delete it!',
+            cancelButtonText: 'Batal'
+        });
+
+        if (!result.isConfirmed) return;
 
         try {
             // Call the database function to delete user completely
-            const { data, error } = await supabase
+            const { error } = await supabase
                 .rpc('delete_user_completely', { user_id: userId });
 
             if (error) {
                 console.error('Delete error:', error);
+                let message = `Gagal menghapus user: ${error.message}`;
                 if (error.message.includes('Only HRGA')) {
-                    alert('Hanya HRGA yang dapat menghapus user');
+                    message = 'Hanya HRGA yang dapat menghapus user';
                 } else if (error.message.includes('Cannot delete your own')) {
-                    alert('Tidak dapat menghapus akun sendiri');
-                } else {
-                    alert(`Gagal menghapus user: ${error.message}`);
+                    message = 'Tidak dapat menghapus akun sendiri';
                 }
+                Swal.fire({
+                    title: 'Gagal!',
+                    text: message,
+                    icon: 'error',
+                    confirmButtonColor: '#d33',
+                });
                 return;
             }
 
-            alert('User berhasil dihapus!');
+            await Swal.fire({
+                title: 'Deleted!',
+                text: `User ${userEmail} berhasil dihapus.`,
+                icon: 'success',
+                confirmButtonColor: '#3085d6',
+            });
             fetchData();
-        } catch (error) {
+        } catch (error: any) {
             console.error('Error deleting user:', error);
-            alert('Gagal menghapus user');
+            Swal.fire({
+                title: 'Error!',
+                text: error?.message || 'Gagal menghapus user',
+                icon: 'error',
+                confirmButtonColor: '#d33',
+            });
         }
     };
 
     const handleResetPassword = async () => {
         if (!resetPasswordUser) return;
         if (!newPassword || newPassword.length < 6) {
-            alert('Password minimal 6 karakter');
+            Swal.fire({
+                title: 'Perhatian',
+                text: 'Password minimal 6 karakter!',
+                icon: 'warning',
+                confirmButtonColor: '#3085d6',
+            });
             return;
         }
 
+        const confirmResult = await Swal.fire({
+            title: 'Are you sure?',
+            text: `Password untuk user ${resetPasswordUser.email} akan direset!`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#3085d6',
+            cancelButtonColor: '#d33',
+            confirmButtonText: 'Yes, reset it!',
+            cancelButtonText: 'Batal'
+        });
+
+        if (!confirmResult.isConfirmed) return;
+
         setProcessing(true);
         try {
-            const { error } = await supabase.auth.admin.updateUserById(
-                resetPasswordUser.id,
-                { password: newPassword }
-            );
+            const { data: { session } } = await supabase.auth.getSession();
+            const token = session?.access_token;
 
-            if (error) throw error;
+            const res = await fetch('/api/users/reset-password', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+                },
+                body: JSON.stringify({
+                    userId: resetPasswordUser.id,
+                    password: newPassword
+                })
+            });
 
-            alert('Password berhasil direset!');
+            const result = await res.json();
+            if (!res.ok) {
+                throw new Error(result.error || 'Gagal reset password');
+            }
+
+            await Swal.fire({
+                title: 'Berhasil!',
+                text: `Password untuk ${resetPasswordUser.email} berhasil direset.`,
+                icon: 'success',
+                confirmButtonColor: '#3085d6',
+            });
+
             setShowResetPasswordModal(false);
             setResetPasswordUser(null);
             setNewPassword('');
         } catch (error: any) {
             console.error('Error resetting password:', error);
-            alert(`Gagal reset password: ${error.message}`);
+            Swal.fire({
+                title: 'Gagal!',
+                text: error?.message || 'Gagal reset password',
+                icon: 'error',
+                confirmButtonColor: '#d33',
+            });
         } finally {
             setProcessing(false);
         }
@@ -360,7 +462,18 @@ export default function UsersPage() {
     const handleBatchDelete = async () => {
         if (selectedUsers.size === 0) return;
 
-        if (!confirm(`Apakah Anda yakin ingin menghapus ${selectedUsers.size} user? User akan dihapus permanen dari sistem.`)) return;
+        const result = await Swal.fire({
+            title: 'Are you sure?',
+            text: `You won't be able to revert this! ${selectedUsers.size} user akan dihapus permanen dari sistem.`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#3085d6',
+            cancelButtonColor: '#d33',
+            confirmButtonText: 'Yes, delete it!',
+            cancelButtonText: 'Batal'
+        });
+
+        if (!result.isConfirmed) return;
 
         setProcessing(true);
         try {
@@ -380,15 +493,30 @@ export default function UsersPage() {
             }
 
             if (successCount > 0) {
-                alert(`${successCount} user berhasil dihapus!${errorCount > 0 ? ` ${errorCount} gagal dihapus.` : ''}`);
+                await Swal.fire({
+                    title: 'Deleted!',
+                    text: `${successCount} user berhasil dihapus.${errorCount > 0 ? ` ${errorCount} gagal dihapus.` : ''}`,
+                    icon: 'success',
+                    confirmButtonColor: '#3085d6',
+                });
                 setSelectedUsers(new Set());
                 fetchData();
             } else {
-                alert('Gagal menghapus user');
+                Swal.fire({
+                    title: 'Gagal!',
+                    text: 'Tidak ada user yang berhasil dihapus.',
+                    icon: 'error',
+                    confirmButtonColor: '#d33',
+                });
             }
-        } catch (error) {
+        } catch (error: any) {
             console.error('Error batch deleting users:', error);
-            alert('Gagal menghapus user');
+            Swal.fire({
+                title: 'Error!',
+                text: error?.message || 'Gagal menghapus user',
+                icon: 'error',
+                confirmButtonColor: '#d33',
+            });
         } finally {
             setProcessing(false);
         }
