@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { subscribeToPush, unsubscribeFromPush } from '@/lib/push-subscription';
+import { toast } from 'sonner';
 
 const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || '';
 
@@ -12,6 +13,7 @@ export default function NotificationManager() {
     const [isSubscribed, setIsSubscribed] = useState(false);
     const [showPrompt, setShowPrompt] = useState(false);
     const [userId, setUserId] = useState<string | null>(null);
+    const [isLoading, setIsLoading] = useState(false);
 
     const checkSubscription = async () => {
         try {
@@ -49,35 +51,113 @@ export default function NotificationManager() {
     }, []);
 
     const requestPermission = async () => {
-        try {
-            const permission = await Notification.requestPermission();
-            setPermission(permission);
-            setShowPrompt(false);
+        if (!isSupported) {
+            toast.error('Browser Anda tidak mendukung Web Push Notification.');
+            return;
+        }
 
-            if (permission === 'granted') {
-                await subscribe();
+        if (Notification.permission === 'denied') {
+            setShowPrompt(false);
+            toast.error('Izin notifikasi diblokir oleh browser. Silakan izinkan melalui ikon gembok / pengaturan situs di samping URL browser Anda.');
+            return;
+        }
+
+        setIsLoading(true);
+        const infoToastId = toast.info('Periksa pojok kiri atas browser (dekat URL bar) dan klik "Izinkan" / "Allow" untuk mengaktifkan notifikasi.', {
+            duration: 10000,
+        });
+
+        try {
+            // Add a timeout for the browser permission request in case the user ignores it
+            const permissionPromise = Notification.requestPermission();
+            const timeoutPromise = new Promise<NotificationPermission>((resolve) =>
+                setTimeout(() => resolve(Notification.permission), 15000)
+            );
+
+            const perm = await Promise.race([permissionPromise, timeoutPromise]);
+            toast.dismiss(infoToastId);
+            setPermission(perm);
+
+            if (perm === 'granted') {
+                setShowPrompt(false);
+                let currentUid = userId;
+                if (!currentUid) {
+                    const { data: { user } } = await supabase.auth.getUser();
+                    currentUid = user?.id || null;
+                    if (currentUid) setUserId(currentUid);
+                }
+
+                if (!currentUid) {
+                    toast.error('Gagal mengaktifkan notifikasi: Akun tidak teridentifikasi.');
+                    return;
+                }
+
+                if (!VAPID_PUBLIC_KEY) {
+                    toast.error('Konfigurasi VAPID Public Key belum disetel di server.');
+                    return;
+                }
+
+                const success = await subscribeToPush(currentUid, VAPID_PUBLIC_KEY);
+                if (success) {
+                    setIsSubscribed(true);
+                    toast.success('Notifikasi berhasil diaktifkan! Anda akan menerima update secara real-time.');
+                } else {
+                    toast.error('Gagal menyimpan langganan notifikasi ke server. Coba refresh halaman.');
+                }
+            } else if (perm === 'denied') {
+                setShowPrompt(false);
+                toast.error('Izin notifikasi ditolak. Anda dapat mengaktifkannya kapan saja di pengaturan browser.');
+            } else {
+                toast.info('Permintaan izin notifikasi belum disetujui di browser.');
             }
         } catch (error) {
             console.error('Error requesting permission:', error);
+            toast.error('Terjadi kesalahan saat meminta izin notifikasi.');
+        } finally {
+            toast.dismiss(infoToastId);
+            setIsLoading(false);
         }
     };
 
     const subscribe = async () => {
-        if (!userId) {
-            console.error('User not logged in');
-            return;
-        }
+        setIsLoading(true);
+        try {
+            let currentUid = userId;
+            if (!currentUid) {
+                const { data: { user } } = await supabase.auth.getUser();
+                currentUid = user?.id || null;
+                if (currentUid) setUserId(currentUid);
+            }
 
-        const success = await subscribeToPush(userId, VAPID_PUBLIC_KEY);
-        if (success) {
-            setIsSubscribed(true);
+            if (!currentUid) {
+                toast.error('User belum login');
+                return;
+            }
+
+            const success = await subscribeToPush(currentUid, VAPID_PUBLIC_KEY);
+            if (success) {
+                setIsSubscribed(true);
+                toast.success('Notifikasi berhasil diaktifkan!');
+            } else {
+                toast.error('Gagal mengaktifkan langganan notifikasi.');
+            }
+        } finally {
+            setIsLoading(false);
         }
     };
 
     const unsubscribe = async () => {
-        const success = await unsubscribeFromPush();
-        if (success) {
-            setIsSubscribed(false);
+        setIsLoading(true);
+        try {
+            const success = await unsubscribeFromPush();
+            if (success) {
+                setIsSubscribed(false);
+                toast.info('Notifikasi dinonaktifkan.');
+            } else {
+                toast.error('Gagal menonaktifkan notifikasi.');
+            }
+        } finally {
+            setIsLoading(false);
         }
     };
 
@@ -107,14 +187,26 @@ export default function NotificationManager() {
                                 <button
                                     onClick={requestPermission}
                                     type="button"
-                                    className="cursor-pointer rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-focus active:scale-95 dark:bg-accent dark:hover:bg-accent-focus"
+                                    disabled={isLoading}
+                                    className="cursor-pointer inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-focus active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-accent dark:hover:bg-accent-focus"
                                 >
-                                    Aktifkan
+                                    {isLoading ? (
+                                        <>
+                                            <svg className="h-4 w-4 animate-spin text-white" fill="none" viewBox="0 0 24 24">
+                                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                                            </svg>
+                                            <span>Memproses...</span>
+                                        </>
+                                    ) : (
+                                        'Aktifkan'
+                                    )}
                                 </button>
                                 <button
                                     onClick={() => setShowPrompt(false)}
                                     type="button"
-                                    className="cursor-pointer rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 active:scale-95 dark:border-navy-450 dark:text-navy-200 dark:hover:bg-navy-600"
+                                    disabled={isLoading}
+                                    className="cursor-pointer rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 active:scale-95 disabled:opacity-50 dark:border-navy-450 dark:text-navy-200 dark:hover:bg-navy-600"
                                 >
                                     Nanti
                                 </button>

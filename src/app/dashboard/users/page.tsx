@@ -3,7 +3,8 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Department, UserRole } from '@/types/database';
-import Swal from 'sweetalert2';
+import { toast } from 'sonner';
+import ConfirmDialog from '@/components/ui/confirm-dialog';
 
 interface UserDepartmentRelation {
     id: string;
@@ -37,6 +38,22 @@ export default function UsersPage() {
     const [selectedUsers, setSelectedUsers] = useState<Set<string>>(new Set());
     const [selectedDepartments, setSelectedDepartments] = useState<string[]>([]); // NEW: for multi-department
     const [primaryDepartment, setPrimaryDepartment] = useState<string>(''); // NEW: primary dept
+
+    // Confirm dialog state (shadcn AlertDialog)
+    const [confirmDialog, setConfirmDialog] = useState<{
+        open: boolean;
+        title: string;
+        description: string;
+        confirmText?: string;
+        variant?: 'destructive' | 'primary';
+        loading?: boolean;
+        onConfirm: () => Promise<void> | void;
+    }>({
+        open: false,
+        title: '',
+        description: '',
+        onConfirm: () => {},
+    });
 
     // Form state
     const [formData, setFormData] = useState({
@@ -198,12 +215,7 @@ export default function UsersPage() {
                     }
                 }
 
-                await Swal.fire({
-                    title: 'Berhasil!',
-                    text: 'User berhasil diupdate!',
-                    icon: 'success',
-                    confirmButtonColor: '#3085d6',
-                });
+                toast.success('User berhasil diupdate!');
             } else {
                 // Create new user via Supabase Auth
                 const { data: authData, error: authError } = await supabase.auth.signUp({
@@ -219,19 +231,9 @@ export default function UsersPage() {
 
                 if (authError) {
                     if (authError.message.includes('already registered')) {
-                        Swal.fire({
-                            title: 'Gagal!',
-                            text: 'Email sudah terdaftar.',
-                            icon: 'error',
-                            confirmButtonColor: '#d33',
-                        });
+                        toast.error('Email sudah terdaftar.');
                     } else {
-                        Swal.fire({
-                            title: 'Error!',
-                            text: authError.message,
-                            icon: 'error',
-                            confirmButtonColor: '#d33',
-                        });
+                        toast.error(authError.message);
                     }
                     throw authError;
                 }
@@ -259,12 +261,7 @@ export default function UsersPage() {
 
                     if (profileError) {
                         console.error('Profile upsert error:', profileError);
-                        Swal.fire({
-                            title: 'Peringatan',
-                            text: `User dibuat namun update profil gagal: ${profileError.message}`,
-                            icon: 'warning',
-                            confirmButtonColor: '#3085d6',
-                        });
+                        toast.warning(`User dibuat namun update profil gagal: ${profileError.message}`);
                     }
 
                     // Insert user_departments for multi-department support
@@ -286,12 +283,7 @@ export default function UsersPage() {
                     }
                 }
 
-                await Swal.fire({
-                    title: 'Berhasil!',
-                    text: 'User berhasil dibuat!',
-                    icon: 'success',
-                    confirmButtonColor: '#3085d6',
-                });
+                toast.success('User berhasil dibuat!');
             }
 
             handleCloseModal();
@@ -299,96 +291,58 @@ export default function UsersPage() {
         } catch (error: any) {
             console.error('Error saving user:', error);
             if (!error?.message?.includes('already registered')) {
-                Swal.fire({
-                    title: 'Gagal!',
-                    text: error?.message || 'Gagal menyimpan user',
-                    icon: 'error',
-                    confirmButtonColor: '#d33',
-                });
+                toast.error(error?.message || 'Gagal menyimpan user');
             }
         } finally {
             setProcessing(false);
         }
     };
 
-    const handleDeleteUser = async (userId: string, userEmail: string) => {
-        const result = await Swal.fire({
-            title: 'Are you sure?',
-            text: `You won't be able to revert this! User ${userEmail} akan dihapus permanen dari sistem.`,
-            icon: 'warning',
-            showCancelButton: true,
-            confirmButtonColor: '#3085d6',
-            cancelButtonColor: '#d33',
-            confirmButtonText: 'Yes, delete it!',
-            cancelButtonText: 'Batal'
-        });
+    const handleDeleteUser = (userId: string, userEmail: string) => {
+        setConfirmDialog({
+            open: true,
+            title: 'Hapus User?',
+            description: `Hapus akun ${userEmail}? Tindakan ini permanen.`,
+            confirmText: 'Hapus',
+            variant: 'destructive',
+            onConfirm: async () => {
+                setConfirmDialog(prev => ({ ...prev, loading: true }));
+                try {
+                    const { data: { session } } = await supabase.auth.getSession();
+                    const token = session?.access_token;
 
-        if (!result.isConfirmed) return;
+                    const res = await fetch('/api/users/delete', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+                        },
+                        body: JSON.stringify({ userIds: [userId] })
+                    });
 
-        try {
-            // Call the database function to delete user completely
-            const { error } = await supabase
-                .rpc('delete_user_completely', { user_id: userId });
+                    const result = await res.json();
+                    if (!res.ok) {
+                        throw new Error(result.error || 'Gagal menghapus user');
+                    }
 
-            if (error) {
-                console.error('Delete error:', error);
-                let message = `Gagal menghapus user: ${error.message}`;
-                if (error.message.includes('Only HRGA')) {
-                    message = 'Hanya HRGA yang dapat menghapus user';
-                } else if (error.message.includes('Cannot delete your own')) {
-                    message = 'Tidak dapat menghapus akun sendiri';
+                    toast.success(`User ${userEmail} berhasil dihapus.`);
+                    setConfirmDialog(prev => ({ ...prev, open: false, loading: false }));
+                    fetchData();
+                } catch (error: any) {
+                    console.error('Error deleting user:', error);
+                    toast.error(error.message || 'Gagal menghapus user');
+                    setConfirmDialog(prev => ({ ...prev, loading: false }));
                 }
-                Swal.fire({
-                    title: 'Gagal!',
-                    text: message,
-                    icon: 'error',
-                    confirmButtonColor: '#d33',
-                });
-                return;
-            }
-
-            await Swal.fire({
-                title: 'Deleted!',
-                text: `User ${userEmail} berhasil dihapus.`,
-                icon: 'success',
-                confirmButtonColor: '#3085d6',
-            });
-            fetchData();
-        } catch (error: any) {
-            console.error('Error deleting user:', error);
-            Swal.fire({
-                title: 'Error!',
-                text: error?.message || 'Gagal menghapus user',
-                icon: 'error',
-                confirmButtonColor: '#d33',
-            });
-        }
+            },
+        });
     };
 
     const handleResetPassword = async () => {
         if (!resetPasswordUser) return;
         if (!newPassword || newPassword.length < 6) {
-            Swal.fire({
-                title: 'Perhatian',
-                text: 'Password minimal 6 karakter!',
-                icon: 'warning',
-                confirmButtonColor: '#3085d6',
-            });
+            toast.warning('Password minimal 6 karakter!');
             return;
         }
-
-        const confirmResult = await Swal.fire({
-            title: 'Are you sure?',
-            text: `Password untuk user ${resetPasswordUser.email} akan direset!`,
-            icon: 'warning',
-            showCancelButton: true,
-            confirmButtonColor: '#3085d6',
-            cancelButtonColor: '#d33',
-            confirmButtonText: 'Yes, reset it!',
-            cancelButtonText: 'Batal'
-        });
-
-        if (!confirmResult.isConfirmed) return;
 
         setProcessing(true);
         try {
@@ -412,24 +366,14 @@ export default function UsersPage() {
                 throw new Error(result.error || 'Gagal reset password');
             }
 
-            await Swal.fire({
-                title: 'Berhasil!',
-                text: `Password untuk ${resetPasswordUser.email} berhasil direset.`,
-                icon: 'success',
-                confirmButtonColor: '#3085d6',
-            });
+            toast.success(`Password untuk ${resetPasswordUser.email} berhasil direset.`);
 
             setShowResetPasswordModal(false);
             setResetPasswordUser(null);
             setNewPassword('');
         } catch (error: any) {
             console.error('Error resetting password:', error);
-            Swal.fire({
-                title: 'Gagal!',
-                text: error?.message || 'Gagal reset password',
-                icon: 'error',
-                confirmButtonColor: '#d33',
-            });
+            toast.error(error?.message || 'Gagal reset password');
         } finally {
             setProcessing(false);
         }
@@ -459,67 +403,49 @@ export default function UsersPage() {
         }
     };
 
-    const handleBatchDelete = async () => {
+    const handleBatchDelete = () => {
         if (selectedUsers.size === 0) return;
 
-        const result = await Swal.fire({
-            title: 'Are you sure?',
-            text: `You won't be able to revert this! ${selectedUsers.size} user akan dihapus permanen dari sistem.`,
-            icon: 'warning',
-            showCancelButton: true,
-            confirmButtonColor: '#3085d6',
-            cancelButtonColor: '#d33',
-            confirmButtonText: 'Yes, delete it!',
-            cancelButtonText: 'Batal'
-        });
+        setConfirmDialog({
+            open: true,
+            title: `Hapus ${selectedUsers.size} User?`,
+            description: `Hapus ${selectedUsers.size} user terpilih secara permanen?`,
+            confirmText: 'Hapus Semua',
+            variant: 'destructive',
+            onConfirm: async () => {
+                setConfirmDialog(prev => ({ ...prev, loading: true }));
+                setProcessing(true);
+                try {
+                    const { data: { session } } = await supabase.auth.getSession();
+                    const token = session?.access_token;
 
-        if (!result.isConfirmed) return;
+                    const res = await fetch('/api/users/delete', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+                        },
+                        body: JSON.stringify({ userIds: Array.from(selectedUsers) })
+                    });
 
-        setProcessing(true);
-        try {
-            let successCount = 0;
-            let errorCount = 0;
+                    const result = await res.json();
+                    if (!res.ok) {
+                        throw new Error(result.error || 'Gagal menghapus user');
+                    }
 
-            for (const userId of Array.from(selectedUsers)) {
-                const { error } = await supabase
-                    .rpc('delete_user_completely', { user_id: userId });
-
-                if (error) {
-                    console.error('Delete error for user:', userId, error);
-                    errorCount++;
-                } else {
-                    successCount++;
+                    toast.success(`${result.deletedCount || selectedUsers.size} user berhasil dihapus.`);
+                    setSelectedUsers(new Set());
+                    setConfirmDialog(prev => ({ ...prev, open: false, loading: false }));
+                    fetchData();
+                } catch (error: any) {
+                    console.error('Error batch deleting users:', error);
+                    toast.error(error.message || 'Gagal menghapus user');
+                    setConfirmDialog(prev => ({ ...prev, loading: false }));
+                } finally {
+                    setProcessing(false);
                 }
-            }
-
-            if (successCount > 0) {
-                await Swal.fire({
-                    title: 'Deleted!',
-                    text: `${successCount} user berhasil dihapus.${errorCount > 0 ? ` ${errorCount} gagal dihapus.` : ''}`,
-                    icon: 'success',
-                    confirmButtonColor: '#3085d6',
-                });
-                setSelectedUsers(new Set());
-                fetchData();
-            } else {
-                Swal.fire({
-                    title: 'Gagal!',
-                    text: 'Tidak ada user yang berhasil dihapus.',
-                    icon: 'error',
-                    confirmButtonColor: '#d33',
-                });
-            }
-        } catch (error: any) {
-            console.error('Error batch deleting users:', error);
-            Swal.fire({
-                title: 'Error!',
-                text: error?.message || 'Gagal menghapus user',
-                icon: 'error',
-                confirmButtonColor: '#d33',
-            });
-        } finally {
-            setProcessing(false);
-        }
+            },
+        });
     };
 
     const getRoleBadge = (role: string) => {
@@ -1042,6 +968,18 @@ export default function UsersPage() {
                     </div>
                 </div>
             )}
+
+            {/* shadcn AlertDialog for Confirmations */}
+            <ConfirmDialog
+                open={confirmDialog.open}
+                onOpenChange={(open) => setConfirmDialog(prev => ({ ...prev, open }))}
+                title={confirmDialog.title}
+                description={confirmDialog.description}
+                confirmText={confirmDialog.confirmText}
+                variant={confirmDialog.variant}
+                loading={confirmDialog.loading}
+                onConfirm={confirmDialog.onConfirm}
+            />
         </div>
     );
 }

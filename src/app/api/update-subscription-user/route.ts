@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
             .from('push_subscriptions')
             .select('*')
             .eq('endpoint', subscription.endpoint)
-            .single();
+            .maybeSingle();
 
         if (existing) {
             // Update user_id if different
@@ -40,9 +40,11 @@ export async function POST(request: NextRequest) {
                     .from('push_subscriptions')
                     .update({ 
                         user_id: userId,
+                        p256dh: subscription.keys?.p256dh || existing.p256dh,
+                        auth: subscription.keys?.auth || existing.auth,
                         updated_at: new Date().toISOString()
                     })
-                    .eq('endpoint', subscription.endpoint);
+                    .eq('id', existing.id);
 
                 if (updateError) {
                     console.error('[Subscription] Update error:', updateError);
@@ -66,11 +68,29 @@ export async function POST(request: NextRequest) {
             });
         }
 
-        // If no existing subscription, this shouldn't happen (user should subscribe first)
+        // If no existing subscription in DB, insert it
+        const { error: insertError } = await supabaseAdmin
+            .from('push_subscriptions')
+            .insert({
+                user_id: userId,
+                endpoint: subscription.endpoint,
+                p256dh: subscription.keys?.p256dh || '',
+                auth: subscription.keys?.auth || '',
+            });
+
+        if (insertError) {
+            console.error('[Subscription] Insert fallback error:', insertError);
+            return NextResponse.json(
+                { error: 'Failed to save subscription' },
+                { status: 500 }
+            );
+        }
+
         return NextResponse.json({ 
-            success: false, 
-            error: 'No subscription found for this device'
-        }, { status: 404 });
+            success: true, 
+            updated: true,
+            message: 'Subscription registered'
+        });
 
     } catch (error) {
         console.error('[Subscription] Update error:', error);

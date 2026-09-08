@@ -353,7 +353,7 @@ export default function NewRequestPage() {
                 }
 
                 if (stockErrors.length > 0) {
-                    alert(`Permintaan tidak dapat dikirim karena melebihi stok:\n- ${stockErrors.join('\n- ')}`);
+                    showColoredToast('warning', `Permintaan melebihi stok:\n- ${stockErrors.join('\n- ')}`);
                     setSubmitting(false);
                     return;
                 }

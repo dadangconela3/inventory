@@ -24,30 +24,63 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Save subscription to database
+        // Save or update subscription in database
         const supabaseAdmin = getSupabaseAdmin();
-        const { data, error } = await supabaseAdmin
-            .from('push_subscriptions')
-            .upsert({
-                user_id: userId,
-                endpoint: subscription.endpoint,
-                p256dh: subscription.keys.p256dh,
-                auth: subscription.keys.auth,
-            }, {
-                onConflict: 'user_id,endpoint'
-            })
-            .select()
-            .single();
 
-        if (error) {
-            console.error('Error saving subscription:', error);
-            return NextResponse.json(
-                { error: 'Failed to save subscription' },
-                { status: 500 }
-            );
+        // Check if this endpoint is already registered for this or another user
+        const { data: existing } = await supabaseAdmin
+            .from('push_subscriptions')
+            .select('*')
+            .eq('endpoint', subscription.endpoint)
+            .maybeSingle();
+
+        let resultData;
+        if (existing) {
+            // Update the existing record with current user_id and keys
+            const { data, error } = await supabaseAdmin
+                .from('push_subscriptions')
+                .update({
+                    user_id: userId,
+                    p256dh: subscription.keys?.p256dh || existing.p256dh,
+                    auth: subscription.keys?.auth || existing.auth,
+                    updated_at: new Date().toISOString(),
+                })
+                .eq('id', existing.id)
+                .select()
+                .single();
+
+            if (error) {
+                console.error('Error updating subscription:', error);
+                return NextResponse.json(
+                    { error: 'Failed to update subscription', details: error.message },
+                    { status: 500 }
+                );
+            }
+            resultData = data;
+        } else {
+            // Insert new record
+            const { data, error } = await supabaseAdmin
+                .from('push_subscriptions')
+                .insert({
+                    user_id: userId,
+                    endpoint: subscription.endpoint,
+                    p256dh: subscription.keys?.p256dh || '',
+                    auth: subscription.keys?.auth || '',
+                })
+                .select()
+                .single();
+
+            if (error) {
+                console.error('Error saving subscription:', error);
+                return NextResponse.json(
+                    { error: 'Failed to save subscription', details: error.message },
+                    { status: 500 }
+                );
+            }
+            resultData = data;
         }
 
-        return NextResponse.json({ success: true, data });
+        return NextResponse.json({ success: true, data: resultData });
     } catch (error) {
         console.error('Error in push subscription endpoint:', error);
         return NextResponse.json(

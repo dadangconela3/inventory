@@ -7,6 +7,41 @@
  * Unsubscribe from push notifications and cleanup from database
  * Can be called from anywhere (logout, settings, etc.)
  */
+async function getServiceWorkerRegistration(timeoutMs = 6000): Promise<ServiceWorkerRegistration> {
+    let reg = await navigator.serviceWorker.getRegistration();
+    if (!reg) {
+        reg = await navigator.serviceWorker.register('/sw-custom.js');
+    }
+
+    if (reg.active) {
+        return reg;
+    }
+
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+            if (reg) {
+                resolve(reg);
+            } else {
+                reject(new Error('Timeout menunggu Service Worker aktif. Silakan refresh halaman.'));
+            }
+        }, timeoutMs);
+
+        navigator.serviceWorker.ready
+            .then((readyReg) => {
+                clearTimeout(timer);
+                resolve(readyReg);
+            })
+            .catch((err) => {
+                clearTimeout(timer);
+                reject(err);
+            });
+    });
+}
+
+/**
+ * Unsubscribe from push notifications and cleanup from database
+ * Can be called from anywhere (logout, settings, etc.)
+ */
 export async function unsubscribeFromPush(): Promise<boolean> {
     try {
         // Check if service worker and push manager are available
@@ -15,8 +50,8 @@ export async function unsubscribeFromPush(): Promise<boolean> {
             return false;
         }
 
-        // Get service worker registration
-        const registration = await navigator.serviceWorker.ready;
+        // Get service worker registration safely
+        const registration = await getServiceWorkerRegistration();
         
         // Get existing push subscription
         const subscription = await registration.pushManager.getSubscription();
@@ -84,33 +119,18 @@ export async function subscribeToPush(userId: string, vapidPublicKey: string): P
             return false;
         }
 
-        const registration = await navigator.serviceWorker.ready;
+        const registration = await getServiceWorkerRegistration();
 
-        // Check if already subscribed
-        const existingSubscription = await registration.pushManager.getSubscription();
-        if (existingSubscription) {
-            console.log('[PushSubscription] Already subscribed, updating user_id if needed');
-            
-            // Update user_id in database
-            const response = await fetch('/api/update-subscription-user', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    subscription: existingSubscription.toJSON(),
-                    userId,
-                }),
+        // Get existing subscription or create a new one
+        let subscription = await registration.pushManager.getSubscription();
+        if (!subscription) {
+            subscription = await registration.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
             });
-
-            return response.ok;
         }
 
-        // Subscribe to push notifications
-        const subscription = await registration.pushManager.subscribe({
-            userVisibleOnly: true,
-            applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
-        });
-
-        // Send subscription to backend
+        // Send subscription to backend (handles both insert and update)
         const response = await fetch('/api/push-subscription', {
             method: 'POST',
             headers: {
@@ -126,7 +146,8 @@ export async function subscribeToPush(userId: string, vapidPublicKey: string): P
             console.log('[PushSubscription] Successfully subscribed to push notifications');
             return true;
         } else {
-            console.error('[PushSubscription] Failed to save subscription to database');
+            const err = await response.json().catch(() => ({}));
+            console.error('[PushSubscription] Failed to save subscription to database:', err);
             return false;
         }
 
@@ -137,8 +158,12 @@ export async function subscribeToPush(userId: string, vapidPublicKey: string): P
 }
 
 function urlBase64ToUint8Array(base64String: string) {
-    const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-    const base64 = (base64String + padding)
+    const cleanKey = (base64String || '').replace(/^"|"$/g, '').trim();
+    if (!cleanKey) {
+        throw new Error('VAPID public key kosong.');
+    }
+    const padding = '='.repeat((4 - (cleanKey.length % 4)) % 4);
+    const base64 = (cleanKey + padding)
         .replace(/-/g, '+')
         .replace(/_/g, '/');
 

@@ -1,5 +1,7 @@
 'use client';
 
+'use client';
+
 import { useState, useEffect, use } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -7,7 +9,7 @@ import { supabase } from '@/lib/supabase';
 import { RequestStatus, Profile } from '@/types/database';
 import SignaturePad from '@/components/ui/SignaturePad';
 import DeleteRequestModal from '@/components/requests/DeleteRequestModal';
-import { showColoredToast } from '@/lib/toast';
+import { showColoredToast, toast } from '@/lib/toast';
 
 interface RequestWithDetails {
     id: string;
@@ -157,10 +159,10 @@ export default function RequestDetailPage({ params }: { params: Promise<{ id: st
             // Refresh request data
             setRequest(prev => prev ? { ...prev, ...updateData } : null);
             setShowSignModal(false);
-            alert('Tanda tangan berhasil disimpan!');
+            toast.success('Tanda tangan berhasil disimpan!');
         } catch (error) {
             console.error('Error saving signature:', error);
-            alert('Gagal menyimpan tanda tangan');
+            toast.error('Gagal menyimpan tanda tangan');
         } finally {
             setProcessing(false);
         }
@@ -626,7 +628,7 @@ export default function RequestDetailPage({ params }: { params: Promise<{ id: st
                 onClose={() => setShowDeleteModal(false)}
                 request={request}
                 onSuccess={(msg) => {
-                    alert(msg);
+                    toast.success(msg);
                     router.push('/dashboard/requests');
                 }}
             />

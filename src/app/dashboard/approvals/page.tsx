@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Request, RequestStatus, Profile } from '@/types/database';
+import { toast } from 'sonner';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
 export default function ApprovalsPage() {
     const [requests, setRequests] = useState<Request[]>([]);
@@ -12,6 +14,22 @@ export default function ApprovalsPage() {
     const [selectedRequest, setSelectedRequest] = useState<Request | null>(null);
     const [rejectionReason, setRejectionReason] = useState('');
     const [processing, setProcessing] = useState(false);
+
+    // Confirm dialog state (shadcn AlertDialog)
+    const [confirmDialog, setConfirmDialog] = useState<{
+        open: boolean;
+        title: string;
+        description: string;
+        confirmText?: string;
+        variant?: 'destructive' | 'primary';
+        loading?: boolean;
+        onConfirm: () => Promise<void> | void;
+    }>({
+        open: false,
+        title: '',
+        description: '',
+        onConfirm: () => {},
+    });
 
     useEffect(() => {
         const fetchData = async () => {
@@ -111,69 +129,79 @@ export default function ApprovalsPage() {
         };
     }, []);
 
-    const handleApprove = async (request: Request) => {
-        if (!confirm('Apakah Anda yakin ingin menyetujui request ini?')) return;
+    const handleApprove = (request: Request) => {
+        setConfirmDialog({
+            open: true,
+            title: 'Setujui Request?',
+            description: `Setujui permintaan ${request.doc_number}?`,
+            confirmText: 'Setujui',
+            variant: 'primary',
+            onConfirm: async () => {
+                setConfirmDialog(prev => ({ ...prev, loading: true }));
+                setProcessing(true);
+                try {
+                    const { error } = await supabase
+                        .from('requests')
+                        .update({
+                            status: 'approved_spv' as RequestStatus,
+                            updated_at: new Date().toISOString(),
+                        })
+                        .eq('id', request.id);
 
-        setProcessing(true);
-        try {
-            const { error } = await supabase
-                .from('requests')
-                .update({
-                    status: 'approved_spv' as RequestStatus,
-                    updated_at: new Date().toISOString(),
-                })
-                .eq('id', request.id);
+                    if (error) throw error;
 
-            if (error) throw error;
+                    // Create notification for requester
+                    await supabase.from('notifications').insert({
+                        user_id: request.requester_id,
+                        message: `Request ${request.doc_number} telah disetujui oleh Supervisor`,
+                        link: `/dashboard/requests/${request.id}`,
+                    });
 
-            // Create notification for requester
-            await supabase.from('notifications').insert({
-                user_id: request.requester_id,
-                message: `Request ${request.doc_number} telah disetujui oleh Supervisor`,
-                link: `/dashboard/requests/${request.id}`,
-            });
+                    // Send push notification to requester
+                    const { sendPushNotification } = await import('@/lib/notifications');
+                    await sendPushNotification({
+                        title: '✅ Request Disetujui',
+                        body: `Request ${request.doc_number} telah disetujui oleh Supervisor`,
+                        link: `/dashboard/requests/${request.id}`,
+                        userId: request.requester_id,
+                    });
 
-            // Send push notification to requester
-            const { sendPushNotification } = await import('@/lib/notifications');
-            await sendPushNotification({
-                title: '✅ Request Disetujui',
-                body: `Request ${request.doc_number} telah disetujui oleh Supervisor`,
-                link: `/dashboard/requests/${request.id}`,
-                userId: request.requester_id,
-            });
+                    // Notify all HRGA users
+                    const { data: hrgaUsers } = await supabase
+                        .from('profiles')
+                        .select('id')
+                        .eq('role', 'hrga');
 
-            // Notify all HRGA users
-            const { data: hrgaUsers } = await supabase
-                .from('profiles')
-                .select('id')
-                .eq('role', 'hrga');
+                    if (hrgaUsers && hrgaUsers.length > 0) {
+                        const hrgaNotifications = hrgaUsers.map(h => ({
+                            user_id: h.id,
+                            message: `Request ${request.doc_number} siap dijadwalkan`,
+                            link: '/dashboard/batches',
+                        }));
+                        await supabase.from('notifications').insert(hrgaNotifications);
 
-            if (hrgaUsers && hrgaUsers.length > 0) {
-                const hrgaNotifications = hrgaUsers.map(h => ({
-                    user_id: h.id,
-                    message: `Request ${request.doc_number} siap dijadwalkan`,
-                    link: '/dashboard/batches',
-                }));
-                await supabase.from('notifications').insert(hrgaNotifications);
+                        // Send push notification to HRGA
+                        await sendPushNotification({
+                            title: '📋 Request Siap Dijadwalkan',
+                            body: `Request ${request.doc_number} siap dijadwalkan`,
+                            link: '/dashboard/batches',
+                            userId: 'hrga-team',
+                        });
+                    }
 
-                // Send push notification to HRGA
-                await sendPushNotification({
-                    title: '📋 Request Siap Dijadwalkan',
-                    body: `Request ${request.doc_number} siap dijadwalkan`,
-                    link: '/dashboard/batches',
-                    userId: 'hrga-team',
-                });
-            }
-
-            // Remove from list
-            setRequests(prev => prev.filter(r => r.id !== request.id));
-            alert('Request berhasil disetujui!');
-        } catch (error) {
-            console.error('Error approving request:', error);
-            alert('Gagal menyetujui request. Silakan coba lagi.');
-        } finally {
-            setProcessing(false);
-        }
+                    // Remove from list
+                    setRequests(prev => prev.filter(r => r.id !== request.id));
+                    toast.success(`Request ${request.doc_number} berhasil disetujui!`);
+                    setConfirmDialog(prev => ({ ...prev, open: false, loading: false }));
+                } catch (error) {
+                    console.error('Error approving request:', error);
+                    toast.error('Gagal menyetujui request. Silakan coba lagi.');
+                    setConfirmDialog(prev => ({ ...prev, loading: false }));
+                } finally {
+                    setProcessing(false);
+                }
+            },
+        });
     };
 
     const handleRejectClick = (request: Request) => {
@@ -185,7 +213,7 @@ export default function ApprovalsPage() {
     const handleRejectConfirm = async () => {
         if (!selectedRequest) return;
         if (!rejectionReason.trim()) {
-            alert('Alasan penolakan wajib diisi');
+            toast.warning('Alasan penolakan wajib diisi');
             return;
         }
 
@@ -213,10 +241,10 @@ export default function ApprovalsPage() {
             setRequests(prev => prev.filter(r => r.id !== selectedRequest.id));
             setShowRejectModal(false);
             setSelectedRequest(null);
-            alert('Request berhasil ditolak.');
+            toast.success('Request berhasil ditolak.');
         } catch (error) {
             console.error('Error rejecting request:', error);
-            alert('Gagal menolak request. Silakan coba lagi.');
+            toast.error('Gagal menolak request. Silakan coba lagi.');
         } finally {
             setProcessing(false);
         }
@@ -376,6 +404,18 @@ export default function ApprovalsPage() {
                     </div>
                 </div>
             )}
+
+            {/* shadcn AlertDialog for Approvals */}
+            <ConfirmDialog
+                open={confirmDialog.open}
+                onOpenChange={(open) => setConfirmDialog(prev => ({ ...prev, open }))}
+                title={confirmDialog.title}
+                description={confirmDialog.description}
+                confirmText={confirmDialog.confirmText}
+                variant={confirmDialog.variant}
+                loading={confirmDialog.loading}
+                onConfirm={confirmDialog.onConfirm}
+            />
         </div>
     );
 }

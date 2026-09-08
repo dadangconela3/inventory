@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { IncomingStock, IncomingStockItem, Item } from '@/types/database';
+import { toast } from 'sonner';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
 interface IncomingWithItems extends IncomingStock {
     items?: (IncomingStockItem & { item?: Item })[];
@@ -27,6 +29,22 @@ export default function IncomingStockPage() {
     });
 
     const [selectedItems, setSelectedItems] = useState<{ item_id: string; quantity: number }[]>([]);
+
+    // Confirm dialog state (shadcn AlertDialog)
+    const [confirmDialog, setConfirmDialog] = useState<{
+        open: boolean;
+        title: string;
+        description: string;
+        confirmText?: string;
+        variant?: 'destructive' | 'primary';
+        loading?: boolean;
+        onConfirm: () => Promise<void> | void;
+    }>({
+        open: false,
+        title: '',
+        description: '',
+        onConfirm: () => {},
+    });
 
     useEffect(() => {
         fetchData();
@@ -90,17 +108,17 @@ export default function IncomingStockPage() {
 
     const handleSubmit = async () => {
         if (!formData.po_number || !formData.incoming_date) {
-            alert('PO Number dan Tanggal wajib diisi');
+            toast.warning('PO Number dan Tanggal wajib diisi');
             return;
         }
 
         if (selectedItems.length === 0) {
-            alert('Tambahkan minimal satu barang');
+            toast.warning('Tambahkan minimal satu barang');
             return;
         }
 
         if (selectedItems.some(item => !item.item_id || item.quantity <= 0)) {
-            alert('Pastikan semua barang dipilih dan quantity > 0');
+            toast.warning('Pastikan semua barang dipilih dan quantity > 0');
             return;
         }
 
@@ -136,38 +154,48 @@ export default function IncomingStockPage() {
 
             if (itemsError) throw itemsError;
 
-            alert('Barang masuk berhasil dicatat!');
+            toast.success('Barang masuk berhasil dicatat!');
             setShowModal(false);
             fetchData();
         } catch (error: any) {
             console.error('Error creating incoming:', error);
             if (error.message?.includes('duplicate')) {
-                alert('PO Number sudah ada. Gunakan PO Number yang berbeda.');
+                toast.error('PO Number sudah ada. Gunakan PO Number yang berbeda.');
             } else {
-                alert(`Gagal menyimpan: ${error.message}`);
+                toast.error(`Gagal menyimpan: ${error.message}`);
             }
         } finally {
             setSubmitting(false);
         }
     };
 
-    const handleDelete = async (incoming: IncomingWithItems) => {
-        if (!confirm(`Hapus incoming stock PO: ${incoming.po_number}?\nStok akan dikurangi kembali.`)) return;
+    const handleDelete = (incoming: IncomingWithItems) => {
+        setConfirmDialog({
+            open: true,
+            title: 'Hapus Incoming?',
+            description: `Hapus PO ${incoming.po_number} dan kurangi stok kembali?`,
+            confirmText: 'Hapus',
+            variant: 'destructive',
+            onConfirm: async () => {
+                setConfirmDialog(prev => ({ ...prev, loading: true }));
+                try {
+                    const { error } = await supabase
+                        .from('incoming_stock')
+                        .delete()
+                        .eq('id', incoming.id);
 
-        try {
-            const { error } = await supabase
-                .from('incoming_stock')
-                .delete()
-                .eq('id', incoming.id);
+                    if (error) throw error;
 
-            if (error) throw error;
-
-            alert('Incoming stock berhasil dihapus!');
-            fetchData();
-        } catch (error) {
-            console.error('Error deleting incoming:', error);
-            alert('Gagal menghapus incoming stock');
-        }
+                    toast.success('Incoming stock berhasil dihapus!');
+                    setConfirmDialog(prev => ({ ...prev, open: false, loading: false }));
+                    fetchData();
+                } catch (error: any) {
+                    console.error('Error deleting incoming:', error);
+                    toast.error(`Gagal menghapus incoming stock: ${error?.message || ''}`);
+                    setConfirmDialog(prev => ({ ...prev, loading: false }));
+                }
+            },
+        });
     };
 
     const openDetailModal = (incoming: IncomingWithItems) => {
@@ -534,6 +562,18 @@ export default function IncomingStockPage() {
                     </div>
                 </div>
             )}
+
+            {/* shadcn AlertDialog for Confirmations */}
+            <ConfirmDialog
+                open={confirmDialog.open}
+                onOpenChange={(open) => setConfirmDialog(prev => ({ ...prev, open }))}
+                title={confirmDialog.title}
+                description={confirmDialog.description}
+                confirmText={confirmDialog.confirmText}
+                variant={confirmDialog.variant}
+                loading={confirmDialog.loading}
+                onConfirm={confirmDialog.onConfirm}
+            />
         </div>
     );
 }

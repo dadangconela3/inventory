@@ -10,16 +10,17 @@ export default function ServiceWorkerRegistration() {
         const registerSW = async () => {
             try {
                 const existingReg = await navigator.serviceWorker.getRegistration();
+                const scriptUrl = existingReg?.active?.scriptURL || existingReg?.installing?.scriptURL || existingReg?.waiting?.scriptURL || '';
                 
-                // If sw-custom.js is already registered, skip
-                if (existingReg?.active?.scriptURL.includes('sw-custom.js')) {
-                    console.log('[SW] Custom service worker already active');
+                // If sw-custom.js is already registered (active, installing, or waiting), keep it
+                if (scriptUrl.includes('sw-custom.js')) {
+                    console.log('[SW] Custom service worker already registered');
                     return;
                 }
 
                 // Unregister any existing non-custom SW
                 if (existingReg) {
-                    console.log('[SW] Unregistering old service worker:', existingReg.active?.scriptURL);
+                    console.log('[SW] Unregistering old service worker:', scriptUrl);
                     await existingReg.unregister();
                 }
 

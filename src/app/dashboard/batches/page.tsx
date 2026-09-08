@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { Request, RequestStatus, Profile } from '@/types/database';
+import { toast } from 'sonner';
 
 export default function BatchSchedulingPage() {
     const [approvedRequests, setApprovedRequests] = useState<Request[]>([]);
@@ -99,11 +100,11 @@ export default function BatchSchedulingPage() {
 
     const handleCreateBatch = async () => {
         if (selectedRequests.size === 0) {
-            alert('Pilih minimal satu request');
+            toast.warning('Pilih minimal satu request');
             return;
         }
         if (!scheduleDate || !scheduleTime) {
-            alert('Pilih tanggal dan waktu pengambilan');
+            toast.warning('Pilih tanggal dan waktu pengambilan');
             return;
         }
 
@@ -170,10 +171,10 @@ export default function BatchSchedulingPage() {
             setSelectedRequests(new Set());
             setShowModal(false);
             setApprovedRequests(prev => prev.filter(r => !selectedRequests.has(r.id)));
-            alert('Batch berhasil dibuat!');
+            toast.success('Batch berhasil dibuat!');
         } catch (error) {
             console.error('Error creating batch:', error);
-            alert('Gagal membuat batch. Silakan coba lagi.');
+            toast.error('Gagal membuat batch. Silakan coba lagi.');
         } finally {
             setSubmitting(false);
         }

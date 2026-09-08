@@ -4,6 +4,7 @@ import { useState, useCallback } from 'react';
 import { createWorker } from 'tesseract.js';
 import { supabase } from '@/lib/supabase';
 import { Item } from '@/types/database';
+import { toast } from 'sonner';
 
 interface ExtractedItem {
     name: string;
@@ -95,7 +96,7 @@ export default function OcrVerifyPage() {
             await worker.terminate();
         } catch (error) {
             console.error('OCR Error:', error);
-            alert('Gagal memproses gambar. Silakan coba lagi.');
+            toast.error('Gagal memproses gambar. Silakan coba lagi.');
         } finally {
             setLoading(false);
         }
@@ -117,7 +118,7 @@ export default function OcrVerifyPage() {
         const confirmedItems = extractedItems.filter(item => item.confirmed && item.item_id);
 
         if (confirmedItems.length === 0) {
-            alert('Tidak ada item yang dikonfirmasi');
+            toast.warning('Tidak ada item yang dikonfirmasi');
             return;
         }
 
@@ -150,14 +151,14 @@ export default function OcrVerifyPage() {
                 }
             }
 
-            alert('Stok berhasil diperbarui!');
+            toast.success('Stok berhasil diperbarui!');
             setFile(null);
             setPreview('');
             setExtractedText('');
             setExtractedItems([]);
         } catch (error) {
             console.error('Error updating stock:', error);
-            alert('Gagal memperbarui stok. Silakan coba lagi.');
+            toast.error('Gagal memperbarui stok. Silakan coba lagi.');
         } finally {
             setProcessing(false);
         }

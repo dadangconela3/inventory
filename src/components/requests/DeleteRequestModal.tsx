@@ -78,6 +78,20 @@ export default function DeleteRequestModal({
         }
     }, [isOpen, request]);
 
+    // Handle ESC key press to close modal
+    useEffect(() => {
+        if (!isOpen) return;
+
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape' && !deleting) {
+                onClose();
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [isOpen, onClose, deleting]);
+
     if (!isOpen || !request) return null;
 
     const isDeleteConfirmed = confirmText.trim().toLowerCase() === 'delete';
@@ -123,7 +137,14 @@ export default function DeleteRequestModal({
     const isCompleted = request.status === 'completed';
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
+        <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs"
+            onClick={(e) => {
+                if (e.target === e.currentTarget && !deleting) {
+                    onClose();
+                }
+            }}
+        >
             <div className="w-full max-w-lg rounded-xl bg-white shadow-2xl dark:bg-navy-700 max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
                 {/* Header */}
                 <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4 dark:border-navy-600 bg-error/5">

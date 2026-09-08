@@ -3,7 +3,8 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Item } from '@/types/database';
-import Swal from 'sweetalert2';
+import { toast } from 'sonner';
+import ConfirmDialog from '@/components/ui/confirm-dialog';
 
 export default function StockManagementPage() {
     const [items, setItems] = useState<Item[]>([]);
@@ -13,6 +14,22 @@ export default function StockManagementPage() {
     const [submitting, setSubmitting] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+
+    // Confirm dialog state (shadcn AlertDialog)
+    const [confirmDialog, setConfirmDialog] = useState<{
+        open: boolean;
+        title: string;
+        description: string;
+        confirmText?: string;
+        variant?: 'destructive' | 'primary';
+        loading?: boolean;
+        onConfirm: () => Promise<void> | void;
+    }>({
+        open: false,
+        title: '',
+        description: '',
+        onConfirm: () => {},
+    });
 
     // Form state
     const [formData, setFormData] = useState({
@@ -70,7 +87,7 @@ export default function StockManagementPage() {
 
     const handleSubmit = async () => {
         if (!formData.name || !formData.sku) {
-            alert('Nama dan SKU wajib diisi');
+            toast.warning('Nama dan SKU wajib diisi');
             return;
         }
 
@@ -95,113 +112,90 @@ export default function StockManagementPage() {
 
             setShowModal(false);
             fetchItems();
-            await Swal.fire({
-                title: 'Berhasil!',
-                text: editingItem ? 'Barang berhasil diperbarui!' : 'Barang berhasil ditambahkan!',
-                icon: 'success',
-                confirmButtonColor: '#3085d6',
-            });
+            toast.success(editingItem ? 'Barang berhasil diperbarui!' : 'Barang berhasil ditambahkan!');
         } catch (error: any) {
             console.error('Error saving item:', error);
-            Swal.fire({
-                title: 'Gagal!',
-                text: error.message || 'Gagal menyimpan barang',
-                icon: 'error',
-                confirmButtonColor: '#d33',
-            });
+            toast.error(error.message || 'Gagal menyimpan barang');
         } finally {
             setSubmitting(false);
         }
     };
 
-    const handleDelete = async (item: Item) => {
-        const confirmResult = await Swal.fire({
-            title: 'Are you sure?',
-            text: `You won't be able to revert this! Hapus barang "${item.name}"?`,
-            icon: 'warning',
-            showCancelButton: true,
-            confirmButtonColor: '#3085d6',
-            cancelButtonColor: '#d33',
-            confirmButtonText: 'Yes, delete it!',
-            cancelButtonText: 'Batal'
-        });
+    const handleDelete = (item: Item) => {
+        setConfirmDialog({
+            open: true,
+            title: 'Hapus Barang?',
+            description: `Hapus barang "${item.name}" (${item.sku})? Tindakan ini permanen.`,
+            confirmText: 'Hapus',
+            variant: 'destructive',
+            loading: false,
+            onConfirm: async () => {
+                setConfirmDialog(prev => ({ ...prev, loading: true }));
+                try {
+                    const { data: { session } } = await supabase.auth.getSession();
+                    const token = session?.access_token;
 
-        if (!confirmResult.isConfirmed) return;
+                    const res = await fetch('/api/items/delete', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+                        },
+                        body: JSON.stringify({ itemIds: [item.id], cascade: false })
+                    });
 
-        try {
-            const { data: { session } } = await supabase.auth.getSession();
-            const token = session?.access_token;
+                    const data = await res.json();
 
-            const res = await fetch('/api/items/delete', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-                },
-                body: JSON.stringify({ itemIds: [item.id], cascade: false })
-            });
+                    if (data.hasReferences) {
+                        setConfirmDialog({
+                            open: true,
+                            title: 'Hapus Barang & Riwayat?',
+                            description: `Barang "${item.name}" memiliki ${data.referenceCount} riwayat transaksi. Hapus semua data terkait?`,
+                            confirmText: 'Hapus Semua',
+                            variant: 'destructive',
+                            loading: false,
+                            onConfirm: async () => {
+                                setConfirmDialog(prev => ({ ...prev, loading: true }));
+                                const cascadeRes = await fetch('/api/items/delete', {
+                                    method: 'POST',
+                                    headers: {
+                                        'Content-Type': 'application/json',
+                                        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+                                    },
+                                    body: JSON.stringify({ itemIds: [item.id], cascade: true })
+                                });
 
-            const data = await res.json();
+                                const cascadeData = await cascadeRes.json();
+                                if (!cascadeRes.ok) {
+                                    toast.error(cascadeData.error || 'Gagal menghapus barang');
+                                    setConfirmDialog(prev => ({ ...prev, open: false, loading: false }));
+                                    return;
+                                }
 
-            // If item has transaction references, offer cascade deletion option
-            if (data.hasReferences) {
-                const cascadeResult = await Swal.fire({
-                    title: 'Barang Memiliki Riwayat!',
-                    text: `Barang "${item.name}" masih terkait dengan ${data.referenceCount} riwayat transaksi (permintaan/stok masuk). Apakah Anda ingin menghapus barang ini beserta seluruh riwayat terkait?`,
-                    icon: 'warning',
-                    showCancelButton: true,
-                    confirmButtonColor: '#d33',
-                    cancelButtonColor: '#3085d6',
-                    confirmButtonText: 'Ya, Hapus Semua!',
-                    cancelButtonText: 'Batal'
-                });
+                                toast.success(`Barang "${item.name}" beserta riwayatnya berhasil dihapus.`);
+                                setConfirmDialog(prev => ({ ...prev, open: false, loading: false }));
+                                fetchItems();
+                            }
+                        });
+                        return;
+                    }
 
-                if (!cascadeResult.isConfirmed) return;
+                    if (!res.ok) {
+                        toast.error(data.error || 'Gagal menghapus barang');
+                        setConfirmDialog(prev => ({ ...prev, open: false, loading: false }));
+                        return;
+                    }
 
-                const cascadeRes = await fetch('/api/items/delete', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-                    },
-                    body: JSON.stringify({ itemIds: [item.id], cascade: true })
-                });
-
-                const cascadeData = await cascadeRes.json();
-                if (!cascadeRes.ok) {
-                    throw new Error(cascadeData.error || 'Gagal menghapus barang');
+                    toast.success(`Barang "${item.name}" berhasil dihapus.`);
+                    setConfirmDialog(prev => ({ ...prev, open: false, loading: false }));
+                    fetchItems();
+                } catch (error: any) {
+                    console.error('Error deleting item:', error);
+                    toast.error(error?.message || 'Gagal menghapus barang');
+                    setConfirmDialog(prev => ({ ...prev, open: false, loading: false }));
                 }
-
-                await Swal.fire({
-                    title: 'Deleted!',
-                    text: `Barang "${item.name}" beserta riwayatnya berhasil dihapus.`,
-                    icon: 'success',
-                    confirmButtonColor: '#3085d6',
-                });
-                fetchItems();
-                return;
             }
-
-            if (!res.ok) {
-                throw new Error(data.error || 'Gagal menghapus barang');
-            }
-
-            await Swal.fire({
-                title: 'Deleted!',
-                text: `Barang "${item.name}" berhasil dihapus.`,
-                icon: 'success',
-                confirmButtonColor: '#3085d6',
-            });
-            fetchItems();
-        } catch (error: any) {
-            console.error('Error deleting item:', error);
-            Swal.fire({
-                title: 'Gagal!',
-                text: error?.message || 'Gagal menghapus barang',
-                icon: 'error',
-                confirmButtonColor: '#d33',
-            });
-        }
+        });
     };
 
     const filteredItems = items.filter(item =>
@@ -229,104 +223,86 @@ export default function StockManagementPage() {
         }
     };
 
-    const handleBatchDelete = async () => {
+    const handleBatchDelete = () => {
         if (selectedItems.size === 0) return;
+        const itemIds = Array.from(selectedItems);
 
-        const confirmResult = await Swal.fire({
-            title: 'Are you sure?',
-            text: `You won't be able to revert this! ${selectedItems.size} barang akan dihapus.`,
-            icon: 'warning',
-            showCancelButton: true,
-            confirmButtonColor: '#3085d6',
-            cancelButtonColor: '#d33',
-            confirmButtonText: 'Yes, delete it!',
-            cancelButtonText: 'Batal'
+        setConfirmDialog({
+            open: true,
+            title: `Hapus ${itemIds.length} Barang?`,
+            description: `Hapus ${itemIds.length} barang terpilih secara permanen?`,
+            confirmText: 'Hapus Semua',
+            variant: 'destructive',
+            loading: false,
+            onConfirm: async () => {
+                setConfirmDialog(prev => ({ ...prev, loading: true }));
+                try {
+                    const { data: { session } } = await supabase.auth.getSession();
+                    const token = session?.access_token;
+
+                    const res = await fetch('/api/items/delete', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+                        },
+                        body: JSON.stringify({ itemIds, cascade: false })
+                    });
+
+                    const data = await res.json();
+
+                    if (data.hasReferences) {
+                        setConfirmDialog({
+                            open: true,
+                            title: 'Hapus Barang & Riwayat?',
+                            description: `Terdapat ${data.referenceCount} riwayat transaksi pada barang terpilih. Hapus semua data terkait?`,
+                            confirmText: 'Hapus Semua',
+                            variant: 'destructive',
+                            loading: false,
+                            onConfirm: async () => {
+                                setConfirmDialog(prev => ({ ...prev, loading: true }));
+                                const cascadeRes = await fetch('/api/items/delete', {
+                                    method: 'POST',
+                                    headers: {
+                                        'Content-Type': 'application/json',
+                                        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+                                    },
+                                    body: JSON.stringify({ itemIds, cascade: true })
+                                });
+
+                                const cascadeData = await cascadeRes.json();
+                                if (!cascadeRes.ok) {
+                                    toast.error(cascadeData.error || 'Gagal menghapus barang');
+                                    setConfirmDialog(prev => ({ ...prev, open: false, loading: false }));
+                                    return;
+                                }
+
+                                toast.success(`${itemIds.length} barang berhasil dihapus.`);
+                                setConfirmDialog(prev => ({ ...prev, open: false, loading: false }));
+                                setSelectedItems(new Set());
+                                fetchItems();
+                            }
+                        });
+                        return;
+                    }
+
+                    if (!res.ok) {
+                        toast.error(data.error || 'Gagal menghapus barang');
+                        setConfirmDialog(prev => ({ ...prev, open: false, loading: false }));
+                        return;
+                    }
+
+                    toast.success(`${itemIds.length} barang berhasil dihapus.`);
+                    setConfirmDialog(prev => ({ ...prev, open: false, loading: false }));
+                    setSelectedItems(new Set());
+                    fetchItems();
+                } catch (error: any) {
+                    console.error('Error batch deleting items:', error);
+                    toast.error(error?.message || 'Gagal menghapus barang');
+                    setConfirmDialog(prev => ({ ...prev, open: false, loading: false }));
+                }
+            }
         });
-
-        if (!confirmResult.isConfirmed) return;
-
-        setSubmitting(true);
-        try {
-            const { data: { session } } = await supabase.auth.getSession();
-            const token = session?.access_token;
-            const itemIds = Array.from(selectedItems);
-
-            const res = await fetch('/api/items/delete', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-                },
-                body: JSON.stringify({ itemIds, cascade: false })
-            });
-
-            const data = await res.json();
-
-            if (data.hasReferences) {
-                const cascadeResult = await Swal.fire({
-                    title: 'Ada Barang Memiliki Riwayat!',
-                    text: `Sebagian barang masih terkait dengan ${data.referenceCount} riwayat transaksi (permintaan/stok masuk). Tetap hapus semua barang ini beserta riwayatnya?`,
-                    icon: 'warning',
-                    showCancelButton: true,
-                    confirmButtonColor: '#d33',
-                    cancelButtonColor: '#3085d6',
-                    confirmButtonText: 'Ya, Hapus Semua!',
-                    cancelButtonText: 'Batal'
-                });
-
-                if (!cascadeResult.isConfirmed) {
-                    setSubmitting(false);
-                    return;
-                }
-
-                const cascadeRes = await fetch('/api/items/delete', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-                    },
-                    body: JSON.stringify({ itemIds, cascade: true })
-                });
-
-                const cascadeData = await cascadeRes.json();
-                if (!cascadeRes.ok) {
-                    throw new Error(cascadeData.error || 'Gagal menghapus barang');
-                }
-
-                await Swal.fire({
-                    title: 'Deleted!',
-                    text: `${itemIds.length} barang berhasil dihapus.`,
-                    icon: 'success',
-                    confirmButtonColor: '#3085d6',
-                });
-                setSelectedItems(new Set());
-                fetchItems();
-                return;
-            }
-
-            if (!res.ok) {
-                throw new Error(data.error || 'Gagal menghapus barang');
-            }
-
-            await Swal.fire({
-                title: 'Deleted!',
-                text: `${itemIds.length} barang berhasil dihapus.`,
-                icon: 'success',
-                confirmButtonColor: '#3085d6',
-            });
-            setSelectedItems(new Set());
-            fetchItems();
-        } catch (error: any) {
-            console.error('Error batch deleting items:', error);
-            Swal.fire({
-                title: 'Gagal!',
-                text: error?.message || 'Gagal menghapus barang',
-                icon: 'error',
-                confirmButtonColor: '#d33',
-            });
-        } finally {
-            setSubmitting(false);
-        }
     };
 
     return (
@@ -638,6 +614,18 @@ export default function StockManagementPage() {
                     </div>
                 </div>
             )}
+
+            {/* shadcn AlertDialog for Confirmations */}
+            <ConfirmDialog
+                open={confirmDialog.open}
+                onOpenChange={(open) => setConfirmDialog(prev => ({ ...prev, open }))}
+                title={confirmDialog.title}
+                description={confirmDialog.description}
+                confirmText={confirmDialog.confirmText}
+                variant={confirmDialog.variant}
+                loading={confirmDialog.loading}
+                onConfirm={confirmDialog.onConfirm}
+            />
         </div>
     );
 }

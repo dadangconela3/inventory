@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Poppins, Inter } from "next/font/google";
 import "./globals.css";
-import "sweetalert2/dist/sweetalert2.min.css";
+import { Toaster } from "sonner";
 import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
 import SubscriptionUserUpdater from "@/components/SubscriptionUserUpdater";
 import AuthStateManager from "@/components/AuthStateManager";
@@ -57,6 +57,7 @@ export default function RootLayout({
         <ServiceWorkerRegistration />
         <SubscriptionUserUpdater />
         <AuthStateManager />
+        <Toaster position="top-right" richColors closeButton />
         {children}
       </body>
     </html>
