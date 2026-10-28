@@ -1,6 +1,7 @@
 @layer theme, base, components, pages, utilities;
 
 @import "tailwindcss";
+@import "../styles/tom-select-custom.css";
 
 /* Lineone Theme Variables - Custom Colors and Design Tokens */
 @custom-variant dark (&:where(.dark, .dark *));

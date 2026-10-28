@@ -1,0 +1,196 @@
+@import "tom-select/dist/css/tom-select.default.css";
+
+/* Lineone Theme TomSelect Custom Styling */
+.ts-wrapper {
+  width: 100%;
+}
+
+.ts-control {
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 0.5rem !important;
+  padding: 0.4rem 0.6rem !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  min-height: 42px !important;
+  font-size: 0.875rem !important;
+  line-height: 1.25rem !important;
+  transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out !important;
+  color: #334155 !important;
+}
+
+:is(.dark) .ts-control {
+  border-color: #465675 !important;
+  color: #e2e8f0 !important;
+  background-color: transparent !important;
+}
+
+.ts-control.focus {
+  border-color: #4f46e5 !important;
+  box-shadow: 0 0 0 1px #4f46e5 !important;
+}
+
+:is(.dark) .ts-control.focus {
+  border-color: #5f5af6 !important;
+  box-shadow: 0 0 0 1px #5f5af6 !important;
+}
+
+.ts-control > input {
+  color: inherit !important;
+  font-size: 0.875rem !important;
+}
+
+.ts-control > input::placeholder {
+  color: #94a3b8 !important;
+  opacity: 0.8 !important;
+}
+
+:is(.dark) .ts-control > input::placeholder {
+  color: #697a9b !important;
+}
+
+/* Multi-select items (tags/pills) */
+.ts-wrapper.multi .ts-control > div.item {
+  background-color: rgba(79, 70, 229, 0.1) !important;
+  color: #4f46e5 !important;
+  border: 1px solid rgba(79, 70, 229, 0.25) !important;
+  border-radius: 0.375rem !important;
+  padding: 3px 8px !important;
+  margin: 2px 4px 2px 0 !important;
+  font-size: 0.8125rem !important;
+  font-weight: 500 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  box-shadow: none !important;
+}
+
+:is(.dark) .ts-wrapper.multi .ts-control > div.item {
+  background-color: rgba(95, 90, 246, 0.18) !important;
+  color: #c7d2fe !important;
+  border-color: rgba(95, 90, 246, 0.35) !important;
+}
+
+.ts-wrapper.multi .ts-control > div.item.active {
+  background-color: #4f46e5 !important;
+  color: #ffffff !important;
+  border-color: #4f46e5 !important;
+}
+
+:is(.dark) .ts-wrapper.multi .ts-control > div.item.active {
+  background-color: #5f5af6 !important;
+  color: #ffffff !important;
+  border-color: #5f5af6 !important;
+}
+
+/* Remove button */
+.ts-wrapper.plugin-remove_button .item .remove {
+  color: inherit !important;
+  border-left: 1px solid rgba(79, 70, 229, 0.2) !important;
+  margin-left: 4px !important;
+  padding-left: 4px !important;
+  font-size: 14px !important;
+  opacity: 0.7 !important;
+  transition: opacity 0.15s, color 0.15s !important;
+  text-decoration: none !important;
+}
+
+:is(.dark) .ts-wrapper.plugin-remove_button .item .remove {
+  border-left-color: rgba(95, 90, 246, 0.3) !important;
+}
+
+.ts-wrapper.plugin-remove_button .item .remove:hover {
+  opacity: 1 !important;
+  color: #ef4444 !important;
+}
+
+/* Dropdown Menu */
+.ts-dropdown {
+  background-color: #ffffff !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 0.5rem !important;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1) !important;
+  margin-top: 4px !important;
+  z-index: 9999 !important;
+  overflow: hidden !important;
+}
+
+:is(.dark) .ts-dropdown {
+  background-color: #26334d !important;
+  border-color: #384766 !important;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3) !important;
+}
+
+.ts-dropdown .ts-dropdown-content {
+  max-height: 220px !important;
+  overflow-y: auto !important;
+  padding: 4px 0 !important;
+}
+
+.ts-dropdown .option {
+  padding: 8px 12px !important;
+  font-size: 0.875rem !important;
+  color: #334155 !important;
+  cursor: pointer !important;
+  transition: background-color 0.15s, color 0.15s !important;
+}
+
+:is(.dark) .ts-dropdown .option {
+  color: #cbd5e1 !important;
+}
+
+.ts-dropdown .option:hover,
+.ts-dropdown .option.active {
+  background-color: rgba(79, 70, 229, 0.08) !important;
+  color: #4f46e5 !important;
+}
+
+:is(.dark) .ts-dropdown .option:hover,
+:is(.dark) .ts-dropdown .option.active {
+  background-color: rgba(95, 90, 246, 0.15) !important;
+  color: #a5b4fc !important;
+}
+
+.ts-dropdown .option.selected {
+  background-color: rgba(79, 70, 229, 0.12) !important;
+  font-weight: 500 !important;
+}
+
+:is(.dark) .ts-dropdown .option.selected {
+  background-color: rgba(95, 90, 246, 0.22) !important;
+}
+
+/* Create new option item */
+.ts-dropdown .create {
+  padding: 9px 12px !important;
+  font-size: 0.875rem !important;
+  border-top: 1px solid #f1f5f9 !important;
+  color: #4f46e5 !important;
+  font-weight: 500 !important;
+  cursor: pointer !important;
+  transition: background-color 0.15s !important;
+}
+
+:is(.dark) .ts-dropdown .create {
+  border-top-color: #384766 !important;
+  color: #a5b4fc !important;
+}
+
+.ts-dropdown .create:hover,
+.ts-dropdown .create.active {
+  background-color: rgba(79, 70, 229, 0.1) !important;
+}
+
+:is(.dark) .ts-dropdown .create:hover,
+:is(.dark) .ts-dropdown .create.active {
+  background-color: rgba(95, 90, 246, 0.2) !important;
+}
+
+.ts-dropdown .no-results {
+  padding: 10px 12px !important;
+  font-size: 0.875rem !important;
+  color: #94a3b8 !important;
+}
+
+:is(.dark) .ts-dropdown .no-results {
+  color: #697a9b !important;
+}

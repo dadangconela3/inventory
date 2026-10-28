@@ -74,10 +74,10 @@ export default function NewRequestPage() {
                     return;
                 }
 
-                // Fetch profile
+                // Fetch profile with departments
                 const { data: profile } = await supabase
                     .from('profiles')
-                    .select('*, department:departments(code, name)')
+                    .select('*, department:departments(code, name), user_departments(department_id)')
                     .eq('id', user.id)
                     .single();
 
@@ -113,14 +113,28 @@ export default function NewRequestPage() {
                             (INDIRECT_DEPARTMENTS as readonly string[]).includes(d.code)
                         );
                     } else if (role === 'admin_dept') {
-                        // Only their own department
-                        filtered = departments.filter(d => d.id === profile.department_id);
+                        // All assigned departments (multi-department support + primary)
+                        const assignedDeptIds = [
+                            ...(profile.user_departments?.map((ud: any) => ud.department_id) || []),
+                            profile.department_id,
+                        ].filter(Boolean);
+
+                        filtered = assignedDeptIds.length > 0
+                            ? departments.filter(d => assignedDeptIds.includes(d.id))
+                            : departments.filter(d => d.id === profile.department_id);
                     } else if (role === 'hrga') {
                         // HRGA can access all departments
                         filtered = departments;
                     } else {
-                        // Default (supervisor, etc): only their department
-                        filtered = departments.filter(d => d.id === profile.department_id);
+                        // Default (supervisor, etc): their assigned departments
+                        const assignedDeptIds = [
+                            ...(profile.user_departments?.map((ud: any) => ud.department_id) || []),
+                            profile.department_id,
+                        ].filter(Boolean);
+
+                        filtered = assignedDeptIds.length > 0
+                            ? departments.filter(d => assignedDeptIds.includes(d.id))
+                            : departments.filter(d => d.id === profile.department_id);
                     }
 
                     console.log('Filtered departments:', filtered.map(d => d.code));
@@ -413,7 +427,7 @@ export default function NewRequestPage() {
 
                 // Determine if this role bypasses supervisor approval
                 const role = userProfile?.role;
-                const bypassSupervisor = role === 'admin_produksi' || role === 'admin_indirect';
+                const bypassSupervisor = role === 'admin_produksi' || role === 'admin_indirect' || role === 'admin_dept';
                 const initialStatus = bypassSupervisor ? 'approved_spv' : 'pending';
 
                 // Create request

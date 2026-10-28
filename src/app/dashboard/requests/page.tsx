@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, Fragment } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { Request, RequestStatus, Profile, UserRole, PRODUCTION_DEPARTMENTS, INDIRECT_DEPARTMENTS, RequestItem, Item } from '@/types/database';
@@ -835,9 +835,8 @@ export default function RequestsListPage() {
                                         const isExpanded = expandedRows.has(request.id);
                                         const itemsCount = request.items?.length || 0;
                                         return (
-                                            <>
+                                            <Fragment key={request.id}>
                                                 <tr
-                                                    key={request.id}
                                                     className={`border-b border-slate-100 transition-colors hover:bg-slate-50/70 last:border-0 dark:border-navy-700 dark:hover:bg-navy-750 ${
                                                         selectedRequests.has(request.id) ? 'bg-primary/5' : ''
                                                     }`}
@@ -994,7 +993,7 @@ export default function RequestsListPage() {
                                                                                     const isRejected = request.status === 'rejected';
 
                                                                                     return (
-                                                                                        <tr key={idx} className="py-1.5">
+                                                                                        <tr key={it.id || `${request.id}-item-${idx}`} className="py-1.5">
                                                                                             <td className="py-2 font-medium text-slate-800 dark:text-navy-100">
                                                                                                 {it.item?.name || 'Barang'}
                                                                                             </td>
@@ -1058,7 +1057,7 @@ export default function RequestsListPage() {
                                                         </td>
                                                     </tr>
                                                 )}
-                                            </>
+                                            </Fragment>
                                         );
                                     })
                                 )}
@@ -1265,7 +1264,7 @@ export default function RequestsListPage() {
                                                     <p className="mb-2 text-xs font-medium uppercase text-slate-500 dark:text-navy-300">Daftar Barang:</p>
                                                     <ul className="space-y-1">
                                                         {(req.items || []).map((item, idx: number) => (
-                                                            <li key={idx} className="flex items-center justify-between text-sm">
+                                                            <li key={item.id || `${req.id}-item-${idx}`} className="flex items-center justify-between text-sm">
                                                                 <span className="text-slate-700 dark:text-navy-100">
                                                                     {item.item?.name} ({item.item?.sku})
                                                                 </span>
@@ -1414,7 +1413,7 @@ export default function RequestsListPage() {
                                                             const isReduced = qty < item.quantity;
 
                                                             return (
-                                                                <li key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-sm border-b border-slate-100 pb-2.5 last:border-0 last:pb-0 dark:border-navy-700">
+                                                                <li key={itemKey} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-sm border-b border-slate-100 pb-2.5 last:border-0 last:pb-0 dark:border-navy-700">
                                                                     <div>
                                                                         <span className="font-medium text-slate-700 dark:text-navy-100">
                                                                             {item.item?.name}

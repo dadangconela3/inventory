@@ -23,6 +23,7 @@
     "sonner": "^2.0.8",
     "tailwind-merge": "^3.6.0",
     "tesseract.js": "^7.0.0",
+    "tom-select": "^2.6.2",
     "web-push": "^3.6.7",
     "xlsx": "^0.18.5"
   },
