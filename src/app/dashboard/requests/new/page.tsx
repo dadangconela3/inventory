@@ -59,7 +59,7 @@ export default function NewRequestPage() {
         if (requestItems.length === 0) {
             setRequestItems([{ id: generateId(), item_id: '', quantity: 1, dept_code: '' }]);
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     // Fetch profile, departments and items on mount
@@ -718,11 +718,10 @@ export default function NewRequestPage() {
                                                             max={selectedItem ? Math.max(1, selectedItem.current_stock) : undefined}
                                                             value={row.quantity}
                                                             onChange={(e) => updateItemRow(row.id, 'quantity', parseInt(e.target.value) || 1)}
-                                                            className={`form-input w-28 rounded-lg border bg-transparent px-3 py-2 text-sm focus:border-primary dark:bg-transparent ${
-                                                                isExceeding || isOutOfStock
+                                                            className={`form-input w-28 rounded-lg border bg-transparent px-3 py-2 text-sm focus:border-primary dark:bg-transparent ${isExceeding || isOutOfStock
                                                                     ? 'border-error text-error focus:border-error ring-1 ring-error/30'
                                                                     : 'border-slate-300 hover:border-slate-400 dark:border-navy-450 dark:hover:border-navy-400'
-                                                            }`}
+                                                                }`}
                                                             required
                                                         />
                                                         {selectedItem && (
@@ -830,11 +829,10 @@ export default function NewRequestPage() {
                                                         max={selectedItem ? Math.max(1, selectedItem.current_stock) : undefined}
                                                         value={row.quantity}
                                                         onChange={(e) => updateItemRow(row.id, 'quantity', parseInt(e.target.value) || 1)}
-                                                        className={`form-input w-full rounded-lg border bg-transparent px-3 py-2 text-sm ${
-                                                            isExceeding || isOutOfStock
+                                                        className={`form-input w-full rounded-lg border bg-transparent px-3 py-2 text-sm ${isExceeding || isOutOfStock
                                                                 ? 'border-error text-error ring-1 ring-error/30'
                                                                 : 'border-slate-300 dark:border-navy-450'
-                                                        }`}
+                                                            }`}
                                                         required
                                                     />
                                                     {selectedItem && (

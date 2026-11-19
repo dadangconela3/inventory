@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { Item } from '@/types/database';
 import { toast } from 'sonner';
 import ConfirmDialog from '@/components/ui/confirm-dialog';
+import * as XLSX from 'xlsx';
 
 export default function StockManagementPage() {
     const [items, setItems] = useState<Item[]>([]);
@@ -113,9 +114,9 @@ export default function StockManagementPage() {
             setShowModal(false);
             fetchItems();
             toast.success(editingItem ? 'Barang berhasil diperbarui!' : 'Barang berhasil ditambahkan!');
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('Error saving item:', error);
-            toast.error(error.message || 'Gagal menyimpan barang');
+            toast.error(error instanceof Error ? error.message : 'Gagal menyimpan barang');
         } finally {
             setSubmitting(false);
         }
@@ -189,9 +190,9 @@ export default function StockManagementPage() {
                     toast.success(`Barang "${item.name}" berhasil dihapus.`);
                     setConfirmDialog(prev => ({ ...prev, open: false, loading: false }));
                     fetchItems();
-                } catch (error: any) {
+                } catch (error: unknown) {
                     console.error('Error deleting item:', error);
-                    toast.error(error?.message || 'Gagal menghapus barang');
+                    toast.error(error instanceof Error ? error.message : 'Gagal menghapus barang');
                     setConfirmDialog(prev => ({ ...prev, open: false, loading: false }));
                 }
             }
@@ -296,13 +297,75 @@ export default function StockManagementPage() {
                     setConfirmDialog(prev => ({ ...prev, open: false, loading: false }));
                     setSelectedItems(new Set());
                     fetchItems();
-                } catch (error: any) {
+                } catch (error: unknown) {
                     console.error('Error batch deleting items:', error);
-                    toast.error(error?.message || 'Gagal menghapus barang');
+                    toast.error(error instanceof Error ? error.message : 'Gagal menghapus barang');
                     setConfirmDialog(prev => ({ ...prev, open: false, loading: false }));
                 }
             }
         });
+    };
+
+    const itemsToExport = selectedItems.size > 0
+        ? items.filter(item => selectedItems.has(item.id))
+        : filteredItems;
+
+    const exportToExcel = () => {
+        if (itemsToExport.length === 0) {
+            toast.warning('Tidak ada data stok untuk diexport');
+            return;
+        }
+
+        try {
+            // Prepare data for export
+            const exportData = itemsToExport.map((item, index) => {
+                let status = 'Aman';
+                if (item.current_stock <= 0) {
+                    status = 'Habis';
+                } else if (item.current_stock <= item.min_stock) {
+                    status = 'Menipis';
+                }
+
+                return {
+                    'No': index + 1,
+                    'SKU': item.sku || '-',
+                    'Nama Barang': item.name,
+                    'Stok Saat Ini': item.current_stock,
+                    'Min. Stok': item.min_stock,
+                    'Satuan': item.unit,
+                    'Status Stok': status,
+                };
+            });
+
+            // Create worksheet
+            const ws = XLSX.utils.json_to_sheet(exportData);
+
+            // Set column widths
+            ws['!cols'] = [
+                { wch: 6 },  // No
+                { wch: 18 }, // SKU
+                { wch: 35 }, // Nama Barang
+                { wch: 15 }, // Stok Saat Ini
+                { wch: 12 }, // Min. Stok
+                { wch: 12 }, // Satuan
+                { wch: 14 }, // Status Stok
+            ];
+
+            // Create workbook
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Master Stok');
+
+            // Generate file name with current date
+            const dateStr = new Date().toISOString().split('T')[0];
+            const fileName = `master-stok-barang-${dateStr}.xlsx`;
+
+            // Download file
+            XLSX.writeFile(wb, fileName);
+            toast.success(`Berhasil mengekspor ${itemsToExport.length} data stok ke Excel`);
+        } catch (error) {
+            console.error('Error exporting to excel:', error);
+            toast.error('Gagal mengekspor data ke Excel');
+        }
     };
 
     return (
@@ -318,15 +381,28 @@ export default function StockManagementPage() {
                     </p>
                 </div>
 
-                <button
-                    onClick={openAddModal}
-                    className="btn bg-primary text-white hover:bg-primary-focus dark:bg-accent dark:hover:bg-accent-focus"
-                >
-                    <svg className="mr-1 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                    </svg>
-                    Tambah Barang
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                    <button
+                        onClick={exportToExcel}
+                        disabled={itemsToExport.length === 0}
+                        className="btn bg-success text-white hover:bg-success-focus disabled:opacity-50 disabled:cursor-not-allowed"
+                        title={selectedItems.size > 0 ? `Export ${selectedItems.size} barang terpilih ke Excel (.xlsx)` : 'Export data stok ke Excel (.xlsx)'}
+                    >
+                        <svg className="mr-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        {selectedItems.size > 0 ? `Export Excel (${selectedItems.size})` : 'Export Excel'}
+                    </button>
+                    <button
+                        onClick={openAddModal}
+                        className="btn bg-primary text-white hover:bg-primary-focus dark:bg-accent dark:hover:bg-accent-focus"
+                    >
+                        <svg className="mr-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                        </svg>
+                        Tambah Barang
+                    </button>
+                </div>
             </div>
 
             {/* Stats Cards */}
@@ -447,13 +523,13 @@ export default function StockManagementPage() {
                         <tbody>
                             {loading ? (
                                 <tr>
-                                    <td colSpan={6} className="px-5 py-12 text-center">
+                                    <td colSpan={7} className="px-5 py-12 text-center">
                                         <div className="h-8 w-8 mx-auto animate-spin rounded-full border-4 border-primary border-t-transparent" />
                                     </td>
                                 </tr>
                             ) : filteredItems.length === 0 ? (
                                 <tr>
-                                    <td colSpan={6} className="px-5 py-12 text-center text-slate-400 dark:text-navy-300">
+                                    <td colSpan={7} className="px-5 py-12 text-center text-slate-400 dark:text-navy-300">
                                         Tidak ada barang ditemukan
                                     </td>
                                 </tr>
